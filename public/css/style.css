@@ -1,0 +1,373 @@
+/* Custom styles for Cornerblock Inventory System, layered on top of Bootstrap 5.
+   Implements the Cornerblock brand: color palette, local fonts, and logo styling. */
+
+/* ============================================================
+   1. LOCAL FONTS
+   Served from public/assets/fonts so the system works fully
+   offline on the office LAN (no Google Fonts CDN dependency).
+   These are variable fonts, one file covers all weights.
+   ============================================================ */
+
+@font-face {
+    font-family: 'Montserrat';
+    src: url('../assets/fonts/montserrat.woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Playfair Display';
+    src: url('../assets/fonts/playfair-display.woff2') format('woff2');
+    font-weight: 400 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Merriweather';
+    src: url('../assets/fonts/merriweather.woff2') format('woff2');
+    font-weight: 300 900;
+    font-display: swap;
+}
+
+/* ============================================================
+   2. BRAND COLOR PALETTE
+   ============================================================ */
+
+:root {
+    --cb-black: #0e0808;   /* near black, main text */
+    --cb-brown: #412118;   /* dark brown, navbar and headings */
+    --cb-taupe: #7f6753;   /* taupe, secondary elements */
+    --cb-beige: #c5b9af;   /* beige, borders and soft accents */
+    --cb-rust:  #a04b1a;   /* rust orange, primary actions and logo */
+    --cb-bg:    #f4f0eb;   /* light tint of the beige for page background */
+}
+
+/* ============================================================
+   3. BASE TYPOGRAPHY
+   Merriweather for body text, Playfair Display for headings,
+   Montserrat for navigation, buttons, forms, and tables.
+   ============================================================ */
+
+body {
+    background-color: var(--cb-bg);
+    color: var(--cb-black);
+    font-family: 'Merriweather', Georgia, serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', Georgia, serif;
+    color: var(--cb-brown);
+}
+
+.navbar, .btn, .form-label, .form-control, .form-select,
+.table, .badge, .nav-link, .modal-title, .form-text, .alert {
+    font-family: 'Montserrat', Arial, sans-serif;
+}
+
+/* ============================================================
+   4. SIDEBAR LAYOUT, TOP BAR, AND LOGO
+   ============================================================ */
+
+.cb-layout {
+    min-height: 100vh;
+}
+
+/* Left sidebar: collapsed to a slim brown rail by default, expands
+   smoothly when the mouse hovers over it. Pure CSS, no JavaScript.
+   It overlays the content when open (position fixed), so the page
+   does not jump around during the animation. */
+.cb-sidebar {
+    background-color: var(--cb-brown);
+    position: fixed;
+    top: 57px; /* starts below the fixed top bar so it can never cover the logo */
+    left: 0;
+    bottom: 0;
+    width: 18px;
+    overflow: hidden;
+    transition: width 0.25s ease;
+    z-index: 1030; /* below the top bar (1040) and below Bootstrap modals (1050+) */
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 6px rgba(14, 8, 8, 0.25);
+}
+
+.cb-sidebar:hover {
+    width: 230px;
+}
+
+/* Keep labels on one line so they slide in cleanly instead of wrapping */
+.cb-sidebar .nav-link,
+.cb-sidebar-brand {
+    white-space: nowrap;
+}
+
+/* Main column leaves room for the collapsed rail on the left and
+   for the fixed top bar above */
+.cb-main {
+    margin-left: 18px;
+    padding-top: 57px;
+}
+
+/* The Cornerblock wordmark: rust orange on the dark brown sidebar,
+   recreated from the brand logo */
+.cb-logo {
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--cb-rust) !important;
+    font-size: 1.4rem;
+    text-decoration: none;
+}
+
+.cb-logo:hover {
+    color: #b85c28 !important;
+}
+
+.cb-sidebar-nav {
+    padding-top: 1rem;
+}
+
+.cb-sidebar .nav-link {
+    color: var(--cb-beige) !important;
+    padding: 0.7rem 1.25rem;
+    border-left: 4px solid transparent;
+}
+
+.cb-sidebar .nav-link:hover {
+    color: #ffffff !important;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Current page: rust accent bar and brighter text */
+.cb-sidebar .nav-link.active {
+    color: #ffffff !important;
+    background-color: rgba(160, 75, 26, 0.25);
+    border-left-color: var(--cb-rust);
+}
+
+/* Settings link: pinned to the bottom of the sidebar */
+.cb-sidebar-settings {
+    margin-top: auto;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+}
+
+/* Top bar: fixed across the full window width, always on top of the
+   sidebar so the logo is never covered by anything. Same dark brown
+   as the sidebar so the two read as one continuous frame. */
+.cb-topbar {
+    background-color: var(--cb-brown);
+    border-bottom: 1px solid rgba(197, 185, 175, 0.25);
+    padding: 0.6rem 1.5rem;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 57px;
+    z-index: 1040; /* above the sidebar, below Bootstrap modals */
+}
+
+.cb-greeting {
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-weight: 600;
+    color: var(--cb-beige);
+    cursor: default;
+}
+
+/* Greeting menu: hovering "Hi, name" reveals the Logout option.
+   Pure CSS, same technique as the hover sidebar. */
+.cb-user-menu {
+    position: relative;
+}
+
+.cb-user-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 100%;
+    background-color: #ffffff;
+    border: 1px solid var(--cb-beige);
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 10px rgba(14, 8, 8, 0.15);
+    min-width: 140px;
+    z-index: 1050;
+}
+
+.cb-user-menu:hover .cb-user-dropdown {
+    display: block;
+}
+
+.cb-user-dropdown a {
+    display: block;
+    padding: 0.6rem 1rem;
+    font-family: 'Montserrat', Arial, sans-serif;
+    text-decoration: none;
+    color: var(--cb-black);
+}
+
+.cb-user-dropdown a:hover {
+    background-color: var(--cb-bg);
+    color: var(--cb-rust);
+}
+
+.cb-content {
+    padding: 1.5rem;
+}
+
+/* ============================================================
+   5. BOOTSTRAP COMPONENT OVERRIDES (palette applied)
+   ============================================================ */
+
+/* Primary action buttons become rust orange.
+   Plain CSS with !important so the palette always wins over
+   Bootstrap's own button colors, whatever the specificity. */
+.btn-primary, .btn-success {
+    background-color: var(--cb-rust) !important;
+    border-color: var(--cb-rust) !important;
+    color: #ffffff !important;
+}
+
+.btn-primary:hover, .btn-success:hover,
+.btn-primary:active, .btn-success:active {
+    background-color: #8a3f15 !important;
+    border-color: #8a3f15 !important;
+}
+
+/* Secondary buttons become taupe */
+.btn-secondary, .btn-outline-secondary {
+    background-color: var(--cb-taupe) !important;
+    border-color: var(--cb-taupe) !important;
+    color: #ffffff !important;
+}
+
+.btn-secondary:hover, .btn-outline-secondary:hover,
+.btn-secondary:active, .btn-outline-secondary:active {
+    background-color: #6a5544 !important;
+    border-color: #6a5544 !important;
+}
+
+/* Warning (stock out) buttons become dark brown with light text */
+.btn-warning {
+    background-color: var(--cb-brown) !important;
+    border-color: var(--cb-brown) !important;
+    color: #ffffff !important;
+}
+
+.btn-warning:hover, .btn-warning:active {
+    background-color: #2e170f !important;
+    border-color: #2e170f !important;
+    color: #ffffff !important;
+}
+
+/* Disabled stock-out buttons (materials at zero stock) stay readable */
+.btn-warning:disabled {
+    background-color: var(--cb-taupe) !important;
+    border-color: var(--cb-taupe) !important;
+    color: #ffffff !important;
+}
+
+/* Table headers use the dark brown instead of Bootstrap's default dark */
+.table-dark, .table-dark th {
+    background-color: var(--cb-brown) !important;
+    border-color: var(--cb-taupe) !important;
+    color: #ffffff !important;
+}
+
+/* Card and table borders pick up the beige */
+.card, .table-bordered {
+    border-color: var(--cb-beige);
+}
+
+.table-bordered > :not(caption) > * > * {
+    border-color: var(--cb-beige);
+}
+
+/* Links */
+a {
+    color: var(--cb-rust);
+}
+
+a:hover {
+    color: #8a3f15;
+}
+
+/* Focused form fields glow rust instead of Bootstrap blue */
+.form-control:focus, .form-select:focus {
+    border-color: var(--cb-rust);
+    box-shadow: 0 0 0 0.25rem rgba(160, 75, 26, 0.25);
+}
+
+/* Active badge (user accounts page) becomes rust */
+.badge.bg-success {
+    background-color: var(--cb-rust) !important;
+}
+
+/* Dashboard stat cards in brand colors: brown for the total count,
+   rust for low stock (warning), near black for out of stock (severe) */
+.cb-card-total {
+    background-color: var(--cb-brown);
+    color: #ffffff;
+}
+
+.cb-card-low {
+    background-color: var(--cb-rust);
+    color: #ffffff;
+}
+
+.cb-card-out {
+    background-color: var(--cb-black);
+    color: #ffffff;
+}
+
+/* Movement type badges follow the palette too: IN rust, OUT brown */
+.badge.bg-warning {
+    background-color: var(--cb-brown) !important;
+    color: #ffffff !important;
+}
+
+/* Modal header carries the brand brown */
+.modal-header {
+    background-color: var(--cb-brown);
+    color: #ffffff;
+}
+
+.modal-header .btn-close {
+    filter: invert(1);
+}
+
+/* ============================================================
+   6. LOGIN PAGE BRAND PANEL
+   ============================================================ */
+
+.cb-login-banner {
+    background-color: var(--cb-brown);
+    border-radius: 0.375rem 0.375rem 0 0;
+    padding: 1.5rem;
+    text-align: center;
+}
+
+.cb-login-banner .cb-logo {
+    font-size: 1.8rem;
+}
+
+/* ============================================================
+   7. PRINT RULES
+   Hide navigation when printing, e.g. the reorder checklist
+   ============================================================ */
+
+@media print {
+    .cb-sidebar, .cb-topbar {
+        display: none !important;
+    }
+
+    /* Remove the space reserved for the fixed bars when they are hidden */
+    .cb-main {
+        margin-left: 0;
+        padding-top: 0;
+    }
+
+    body {
+        background-color: #ffffff;
+    }
+}

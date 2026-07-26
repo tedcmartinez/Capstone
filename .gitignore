@@ -1,0 +1,8 @@
+/vendor/
+config/email.config.php
+*.log
+.DS_Store
+
+# Uploaded receipt images are runtime client data, keep the folder but not its contents
+public/uploads/receipts/*
+!public/uploads/receipts/.gitkeep

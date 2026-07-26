@@ -1,0 +1,2 @@
+# Block all direct web access to the raw SQL files in this folder.
+Require all denied

@@ -1,0 +1,3 @@
+# Block all direct web access to this folder. Controllers, models, and views
+# are only ever loaded through public/index.php, never requested directly.
+Require all denied

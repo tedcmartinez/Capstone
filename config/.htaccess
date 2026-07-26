@@ -1,0 +1,4 @@
+# Block all direct web access to this folder.
+# It holds database credentials and Gmail SMTP credentials and must
+# never be reachable by URL, even though it lives under htdocs.
+Require all denied

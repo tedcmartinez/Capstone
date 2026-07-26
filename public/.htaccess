@@ -1,0 +1,6 @@
+# Route every request that is not a real file or folder through index.php
+# This gives the app clean URLs like /cornerblock/public/materials/edit/5
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]

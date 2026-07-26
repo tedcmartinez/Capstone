@@ -1,0 +1,9 @@
+{
+    "name": "cornerblock/inventory-system",
+    "description": "LAN-Based Materials Inventory Management System with Email Notification for Cornerblock Trading Inc.",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "phpmailer/phpmailer": "^7.1"
+    }
+}
