@@ -14,16 +14,37 @@ class MaterialController extends Controller
     public function index()
     {
         $materialModel = $this->model('Material');
-        $keyword = trim($_GET['q'] ?? '');
-        $materials = $materialModel->getAll($keyword);
 
-        // Suppliers and categories are needed by the edit modals that are
-        // embedded in the materials table (one modal per row)
+        // Search box, filter dropdowns, and the sort chosen by clicking a
+        // column header. All of them arrive in the query string.
+        $keyword = trim($_GET['q'] ?? '');
+        $category = trim($_GET['category'] ?? '');
+        $status = $_GET['status'] ?? '';
+        $supplierId = $_GET['supplier'] ?? '';
+        $sort = $_GET['sort'] ?? 'name';
+        $direction = ($_GET['dir'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
+
+        $materials = $materialModel->getFiltered([
+            'keyword' => $keyword,
+            'category' => $category,
+            'status' => $status,
+            'supplier_id' => $supplierId,
+            'sort' => $sort,
+            'direction' => $direction,
+        ]);
+
+        // Suppliers and categories are needed by the filter dropdowns and by
+        // the edit modals that are embedded in the materials table
         $supplierModel = $this->model('Supplier');
 
         $this->view('materials/index', [
             'materials' => $materials,
             'keyword' => $keyword,
+            'category' => $category,
+            'status' => $status,
+            'supplierId' => $supplierId,
+            'sort' => $sort,
+            'direction' => $direction,
             'suppliers' => $supplierModel->getAll(),
             'categories' => $materialModel->getCategories(),
         ]);

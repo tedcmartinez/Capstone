@@ -133,4 +133,152 @@ class Material extends Model
     {
         return (int) $this->db->query('SELECT COUNT(*) FROM materials WHERE stock_quantity = 0')->fetchColumn();
     }
+
+    // ============================================================
+    // Inventory health
+    // The dashboard splits the catalog into three states so the
+    // manager can see the condition of stock at a glance:
+    //   out     = nothing left at all
+    //   low     = still has stock, but at or below the threshold
+    //   healthy = above the threshold
+    // countLowStock() above is kept unchanged because the reorder
+    // checklist and the email alerts both rely on it.
+    // ============================================================
+
+    // Low but not empty, so it is not counted twice with out-of-stock
+    public function countLowOnly(): int
+    {
+        $sql = 'SELECT COUNT(*) FROM materials
+                WHERE stock_quantity > 0 AND stock_quantity <= min_threshold';
+        return (int) $this->db->query($sql)->fetchColumn();
+    }
+
+    public function countHealthy(): int
+    {
+        return (int) $this->db->query('SELECT COUNT(*) FROM materials WHERE stock_quantity > min_threshold')->fetchColumn();
+    }
+
+    // Total money value of everything on hand: stock x cost per unit.
+    // Materials with no cost recorded simply add nothing to the total.
+    public function inventoryValue(): float
+    {
+        $sql = 'SELECT COALESCE(SUM(stock_quantity * cost_per_unit), 0) FROM materials';
+        return (float) $this->db->query($sql)->fetchColumn();
+    }
+
+    // ============================================================
+    // Catalog search, filtering and sorting
+    // ============================================================
+
+    // Returns materials matching the search box and the filter dropdowns,
+    // sorted by the chosen column.
+    // $options keys: keyword, category, status, supplier_id, sort, direction
+    public function getFiltered(array $options = []): array
+    {
+        $keyword    = trim($options['keyword'] ?? '');
+        $category   = trim($options['category'] ?? '');
+        $status     = $options['status'] ?? '';
+        $supplierId = $options['supplier_id'] ?? '';
+
+        $sql = 'SELECT m.*, s.name AS supplier_name
+                FROM materials m
+                LEFT JOIN suppliers s ON m.supplier_id = s.supplier_id
+                WHERE 1 = 1';
+        $params = [];
+
+        if ($keyword !== '') {
+            // PDO requires each named placeholder to be unique, so the same
+            // keyword is bound twice under two different names
+            $sql .= ' AND (m.name LIKE :kw_name OR m.category LIKE :kw_category)';
+            $params[':kw_name'] = '%' . $keyword . '%';
+            $params[':kw_category'] = '%' . $keyword . '%';
+        }
+
+        if ($category !== '') {
+            $sql .= ' AND m.category = :category';
+            $params[':category'] = $category;
+        }
+
+        if ($supplierId !== '' && ctype_digit((string) $supplierId)) {
+            $sql .= ' AND m.supplier_id = :supplier_id';
+            $params[':supplier_id'] = (int) $supplierId;
+        }
+
+        // Stock status uses the same three rules as the dashboard
+        if ($status === 'out') {
+            $sql .= ' AND m.stock_quantity = 0';
+        } elseif ($status === 'low') {
+            $sql .= ' AND m.stock_quantity > 0 AND m.stock_quantity <= m.min_threshold';
+        } elseif ($status === 'healthy') {
+            $sql .= ' AND m.stock_quantity > m.min_threshold';
+        }
+
+        $sql .= ' ORDER BY ' . $this->sortColumn($options['sort'] ?? 'name')
+              . ' ' . (strtolower($options['direction'] ?? 'asc') === 'desc' ? 'DESC' : 'ASC');
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    // Translates a sort key from the URL into a real column name.
+    // Anything unrecognised falls back to the name, so a tampered
+    // URL can never inject SQL into the ORDER BY clause.
+    private function sortColumn(string $sort): string
+    {
+        $allowed = [
+            'name'     => 'm.name',
+            'category' => 'm.category',
+            'stock'    => 'm.stock_quantity',
+            'cost'     => 'm.cost_per_unit',
+            'supplier' => 's.name',
+        ];
+        return $allowed[$sort] ?? 'm.name';
+    }
+
+    // ============================================================
+    // Grouped summaries used by the Categories page and reports
+    // ============================================================
+
+    // One row per category with its item count, total stock and value
+    public function getCategoryStats(): array
+    {
+        $sql = 'SELECT category,
+                       COUNT(*) AS item_count,
+                       SUM(stock_quantity) AS total_stock,
+                       COALESCE(SUM(stock_quantity * cost_per_unit), 0) AS total_value,
+                       SUM(CASE WHEN stock_quantity = 0 THEN 1 ELSE 0 END) AS out_count,
+                       SUM(CASE WHEN stock_quantity > 0 AND stock_quantity <= min_threshold THEN 1 ELSE 0 END) AS low_count
+                FROM materials
+                GROUP BY category
+                ORDER BY category ASC';
+        return $this->db->query($sql)->fetchAll();
+    }
+
+    // One row per supplier with how many materials they supply.
+    // Suppliers with no materials yet still appear, showing zero.
+    public function getSupplierStats(): array
+    {
+        $sql = 'SELECT s.supplier_id, s.name, s.viber_contact, s.notes,
+                       COUNT(m.material_id) AS item_count,
+                       COALESCE(SUM(m.stock_quantity * m.cost_per_unit), 0) AS total_value,
+                       SUM(CASE WHEN m.stock_quantity <= m.min_threshold THEN 1 ELSE 0 END) AS reorder_count
+                FROM suppliers s
+                LEFT JOIN materials m ON m.supplier_id = s.supplier_id
+                GROUP BY s.supplier_id, s.name, s.viber_contact, s.notes
+                ORDER BY s.name ASC';
+        return $this->db->query($sql)->fetchAll();
+    }
+
+    // Every material with its value, used by the inventory value report.
+    // Most valuable first so the biggest holdings are at the top.
+    public function getValueReport(): array
+    {
+        $sql = 'SELECT m.*, s.name AS supplier_name,
+                       (m.stock_quantity * m.cost_per_unit) AS total_value
+                FROM materials m
+                LEFT JOIN suppliers s ON m.supplier_id = s.supplier_id
+                ORDER BY total_value DESC, m.name ASC';
+        return $this->db->query($sql)->fetchAll();
+    }
 }

@@ -45,7 +45,12 @@ class MovementController extends Controller
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $materialId = $_POST['material_id'] ?? '';
             $quantity = $_POST['quantity'] ?? '';
-            $notes = trim($_POST['notes'] ?? '');
+
+            // Reason and reference are combined into the existing notes
+            // column, e.g. "Purchase | Ref: PO-1042 | delivered late".
+            // Keeping them in one field means no database change was needed
+            // and every movement already recorded stays readable.
+            $notes = $this->buildNotes($type, $_POST);
 
             // The movement date is always set by the server to today.
             // It is not taken from the form, so it cannot be changed or
@@ -109,6 +114,42 @@ class MovementController extends Controller
             'materials' => $materials,
             'errors' => $errors,
         ]);
+    }
+
+    // Joins the reason dropdown, the reference / project box, and the free
+    // text notes into the single notes column that the database already has.
+    // Only the parts the user actually filled in are included.
+    private function buildNotes(string $type, array $post): string
+    {
+        $parts = [];
+
+        $reason = trim($post['reason'] ?? '');
+        if ($reason !== '' && in_array($reason, $this->allowedReasons($type), true)) {
+            $parts[] = $reason;
+        }
+
+        $reference = trim($post['reference'] ?? '');
+        if ($reference !== '') {
+            // Stock-in references a purchase document, stock-out a project
+            $parts[] = ($type === 'in' ? 'Ref: ' : 'Project: ') . $reference;
+        }
+
+        $notes = trim($post['notes'] ?? '');
+        if ($notes !== '') {
+            $parts[] = $notes;
+        }
+
+        return implode(' | ', $parts);
+    }
+
+    // The reason options each form is allowed to submit. Anything else is
+    // ignored, so a hand-edited form cannot store arbitrary text here.
+    private function allowedReasons(string $type): array
+    {
+        if ($type === 'in') {
+            return ['Purchase', 'Restock', 'Return', 'Correction'];
+        }
+        return ['Project Usage', 'Damaged', 'Transfer', 'Other'];
     }
 
     // Validates and stores an uploaded receipt image.

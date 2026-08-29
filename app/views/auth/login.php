@@ -9,42 +9,46 @@
          forces browsers to fetch the latest version instead of a cached copy -->
     <link rel="stylesheet" href="<?= BASE_URL ?>css/style.css?v=<?= filemtime(ROOT_PATH . '/public/css/style.css') ?>">
 </head>
-<body class="bg-light">
-<div class="container">
-    <div class="row justify-content-center mt-5">
-        <div class="col-md-5">
-            <div class="card shadow-sm">
-                <!-- Brand banner: the Cornerblock wordmark on dark brown -->
-                <div class="cb-login-banner">
-                    <span class="cb-logo">Cornerblock</span>
-                </div>
-                <div class="card-body p-4">
-                    <p class="text-center text-muted mb-4">Materials Inventory Management System</p>
+<body>
+<!-- Standalone page: no sidebar or top bar, just the branded login card -->
+<div class="cb-login">
+    <div class="cb-login-card">
+        <div class="cb-login-head">
+            <div class="cb-login-mark">C</div>
+            <div class="cb-login-word">Cornerblock</div>
+            <div class="cb-login-tag">Materials Inventory Management System</div>
+        </div>
 
-                    <?php if (!empty($errors)): ?>
-                    <div class="alert alert-danger">
-                        <ul class="mb-0">
-                            <?php foreach ($errors as $error): ?>
-                            <li><?= htmlspecialchars($error) ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
-                    <?php endif; ?>
-
-                    <form method="POST" action="<?= BASE_URL ?>login" novalidate>
-                        <div class="mb-3">
-                            <label for="email" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="email" name="email" required
-                                   value="<?= htmlspecialchars($old['email'] ?? '') ?>">
-                        </div>
-                        <div class="mb-3">
-                            <label for="password" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100">Log In</button>
-                    </form>
+        <div class="cb-login-body">
+            <?php if (!empty($errors)): ?>
+            <div class="cb-alert is-danger">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="flex-shrink:0;margin-top:2px;"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5m.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/></svg>
+                <div>
+                    <?php foreach ($errors as $error): ?>
+                    <div><?= htmlspecialchars($error) ?></div>
+                    <?php endforeach; ?>
                 </div>
             </div>
+            <?php endif; ?>
+
+            <form method="POST" action="<?= BASE_URL ?>login" novalidate>
+                <div class="cb-field">
+                    <label for="email" class="cb-field-label">Email</label>
+                    <input type="email" class="cb-input" id="email" name="email" required
+                           autocomplete="username" autofocus
+                           value="<?= htmlspecialchars($old['email'] ?? '') ?>">
+                </div>
+                <div class="cb-field">
+                    <label for="password" class="cb-field-label">Password</label>
+                    <input type="password" class="cb-input" id="password" name="password" required
+                           autocomplete="current-password">
+                </div>
+                <button type="submit" class="cb-btn cb-btn-primary w-100">Log In</button>
+            </form>
+
+            <p class="cb-help text-center mt-4 mb-0">
+                Cornerblock Trading Inc. &middot; Internal use only
+            </p>
         </div>
     </div>
 </div>

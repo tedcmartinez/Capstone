@@ -14,6 +14,10 @@ class Router
         'movements'  => ['controller' => 'MovementController', 'default' => 'index'],
         'checklist'  => ['controller' => 'ChecklistController', 'default' => 'index'],
         'users'      => ['controller' => 'UserController', 'default' => 'index'],
+        'categories' => ['controller' => 'CategoryController', 'default' => 'index'],
+        'suppliers'  => ['controller' => 'SupplierController', 'default' => 'index'],
+        'reports'    => ['controller' => 'ReportController', 'default' => 'index'],
+        'settings'   => ['controller' => 'SettingsController', 'default' => 'index'],
     ];
 
     public function dispatch()
