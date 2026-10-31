@@ -279,7 +279,7 @@ describe('the webmaster address', () => {
 
     expect(session.isWebmaster()).toBe(true);
     expect(session.isManager()).toBe(true);
-    expect(session.canChangeManagerRole()).toBe(true);
+    expect(session.canPromoteToManager()).toBe(true);
   });
 
   it('treats a look-alike address as ordinary staff', async () => {

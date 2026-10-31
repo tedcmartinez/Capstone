@@ -236,7 +236,9 @@ function table(rows, manager) {
     </div>`;
 }
 
-function row(material, manager) {
+// Exported for tests/unit/material-actions.test.js, which checks who is
+// offered Adjust Stock, Edit and Archive
+export function row(material, manager) {
   const stock = Number(material.stockQuantity) || 0;
   const status = stockStatus(stock, material.minThreshold);
   const isEmpty = stock === 0;
@@ -297,7 +299,8 @@ function row(material, manager) {
 // create.php and edit.php, including which of them a manager alone may set.
 // ============================================================
 
-function materialModal(manager, categories) {
+// Exported for tests/unit/material-actions.test.js, alongside row()
+export function materialModal(manager, categories) {
   return `
     <div class="modal fade" id="cbMaterialModal" tabindex="-1">
       <div class="modal-dialog modal-dialog-centered">
@@ -402,6 +405,17 @@ function materialModal(manager, categories) {
             </div>
 
             <div class="modal-footer">
+              ${
+                // Editing never changes the stock figure, so the way to
+                // correct one is offered right here. Managers only, and
+                // hidden while adding, since a new material has no stock
+                // to correct yet.
+                manager
+                  ? `<button type="button" class="cb-btn cb-btn-outline me-auto" id="cbMaterialAdjust" hidden>
+                       Adjust Stock
+                     </button>`
+                  : ''
+              }
               <button type="button" class="cb-btn cb-btn-outline" data-bs-dismiss="modal">Cancel</button>
               <button type="submit" class="cb-btn cb-btn-primary" id="cbMaterialSave">Save Material</button>
             </div>
@@ -454,6 +468,7 @@ function wire() {
 
   $('#cbAddMaterial', container)?.addEventListener('click', () => openModal(null));
   $('#cbMaterialForm', container)?.addEventListener('submit', save);
+  $('#cbMaterialAdjust', container)?.addEventListener('click', adjustFromEdit);
   $('#cbStockForm', container)?.addEventListener('submit', saveStock);
   $('#cbAdjustForm', container)?.addEventListener('submit', saveAdjustment);
 }
@@ -555,6 +570,9 @@ function openModal(id) {
     stockField.querySelector('input').required = !material;
   }
 
+  const adjustButton = $('#cbMaterialAdjust', container);
+  if (adjustButton) adjustButton.hidden = !material;
+
   if (material) {
     form.name.value = material.name || '';
     form.category.value = material.category || '';
@@ -569,6 +587,18 @@ function openModal(id) {
   }
 
   modalFor('#cbMaterialModal').show();
+}
+
+// From the Edit modal to the Adjust modal. The second only opens once the
+// first has finished closing: Bootstrap shares one dark backdrop between
+// modals, and opening a second while the first is still animating away
+// leaves the backdrop behind, greying out the page with nothing on it.
+function adjustFromEdit() {
+  const id = editingId;
+  const editElement = document.querySelector('#cbMaterialModal');
+
+  editElement.addEventListener('hidden.bs.modal', () => openAdjustModal(id), { once: true });
+  modalFor('#cbMaterialModal').hide();
 }
 
 // Bootstrap's modal, reached through the global it defines. The bundle is

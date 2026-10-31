@@ -123,6 +123,14 @@ service cloud.firestore {
       return resource != null;
     }
 
+    // A role change that makes someone a general manager who was not one.
+    // Keeping an existing manager's role while changing their status is not
+    // a promotion, so a manager may still disable or re-enable another.
+    function promotesToManager() {
+      return request.resource.data.role == 'general_manager'
+          && resource.data.role != 'general_manager';
+    }
+
     // The append-only audit trail is enforced here rather than trusted to
     // the client. A write is accepted only when it carries a lastAuditId
     // pointing at an audit_logs document that:
@@ -297,23 +305,39 @@ service cloud.firestore {
         && audited()
         && changed().hasOnly(['name', 'photoURL', 'lastLoginAt', 'emailVerified', 'lastAuditId']);
 
-      // Managers approve, reject, disable, and set roles.
-      //   uid != own          nobody edits their own role or status
-      //   role != webmaster   the webmaster account cannot be touched by
-      //                       anyone, before or after the write
-      //   general_manager     only the webmaster may grant or remove it, so
-      //                       a manager cannot create a second manager or
-      //                       demote the one the client depends on
+      // Managing other people's accounts: approving, rejecting, disabling,
+      // re-enabling, and changing roles.
+      //
+      //   Nobody touches their own account. Changing your own role or status
+      //   is refused for every role, which is what stops anyone promoting
+      //   themselves, and also stops a manager disabling themselves by
+      //   mistake and locking the shop out.
+      //
+      //   Nobody touches the webmaster account, before or after the write.
+      //
+      //   Only the webmaster may PROMOTE someone to general manager. A
+      //   manager cannot create another manager, so the number of people
+      //   with access to costs and the audit trail can only grow with the
+      //   webmaster's say-so.
+      //
+      //   A manager MAY demote, disable and re-enable other managers, as
+      //   well as staff. That lets the shop deal with a manager who leaves
+      //   without waiting for the webmaster. If managers ever lock each
+      //   other out, the webmaster can still promote someone, which is the
+      //   recovery path the webmaster role exists for.
+      //
+      //   role and status can only take the values the system knows. Without
+      //   this a role could be set to any made-up text, which no rule would
+      //   then recognise.
       allow update: if isGM()
         && isRealUpdate()
         && request.auth.uid != uid
         && audited()
+        && changed().hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'lastAuditId'])
         && resource.data.role != 'webmaster'
-        && request.resource.data.role != 'webmaster'
-        && (isWebmaster()
-            || (resource.data.role != 'general_manager'
-                && request.resource.data.role != 'general_manager'))
-        && changed().hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'lastAuditId']);
+        && request.resource.data.role in ['production_staff', 'general_manager']
+        && request.resource.data.status in ['pending', 'active', 'disabled']
+        && (isWebmaster() || !promotesToManager());
 
       // Accounts are disabled, never deleted, so movement history keeps
       // pointing at a real person.

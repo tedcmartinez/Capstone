@@ -31,14 +31,13 @@ import {
 } from '../lib/dom.js';
 import {
   ROLE_WEBMASTER,
-  ROLE_GENERAL_MANAGER,
-  ROLE_PRODUCTION_STAFF,
   ROLE_LABELS,
   STATUS_PENDING,
   STATUS_ACTIVE,
   STATUS_DISABLED,
 } from '../lib/config.js';
-import { currentUser, isWebmaster, canChangeManagerRole } from '../lib/session.js';
+import { currentUser } from '../lib/session.js';
+import { accountActions, roleAfter } from '../lib/accounts.js';
 
 let users = [];
 let activeTab = STATUS_PENDING;
@@ -188,61 +187,48 @@ function row(user) {
       <td>${esc(user.provider === 'google.com' ? 'Google' : 'Password')}</td>
       <td>${esc(ROLE_LABELS[user.role] || user.role || '')}</td>
       <td title="${esc(longDateTime(user.createdAt))}">${esc(shortDate(user.createdAt))}</td>
-      <td class="text-end">${actions(user, isSelf, targetIsWebmaster)}</td>
+      <td class="text-end">${actions(user)}</td>
     </tr>`;
 }
 
 // Which buttons a row gets. These mirror firestore.rules exactly: anything
 // the rules would refuse is not offered, so a manager is never presented
 // with a button that fails when clicked.
-function actions(user, isSelf, targetIsWebmaster) {
-  // The webmaster account cannot be edited by anybody, including itself
-  if (targetIsWebmaster) {
-    return '<span class="cb-help">Cannot be changed</span>';
+// Which buttons a row gets. Decided by accountActions() in lib/accounts.js,
+// which mirrors the users rule in firestore.rules, so a manager is never
+// offered a button that would be refused, and never denied one the rules
+// would allow.
+function actions(user) {
+  const allowed = accountActions(currentUser(), user);
+
+  if (allowed.reason) {
+    return `<span class="cb-help">${esc(allowed.reason)}</span>`;
   }
 
-  // Nobody edits their own role or status, which is what stops a manager
-  // promoting themselves
-  if (isSelf) {
-    return '<span class="cb-help">Your own account</span>';
-  }
-
+  const id = esc(user.id);
   const buttons = [];
 
-  if (user.status === STATUS_PENDING) {
+  if (allowed.approve) {
+    buttons.push(`<button type="button" class="cb-btn cb-btn-sm cb-btn-in" data-act="approve" data-id="${id}">Approve</button>`);
+  }
+  if (allowed.reject) {
+    buttons.push(`<button type="button" class="cb-btn cb-btn-sm cb-btn-outline" data-act="reject" data-id="${id}">Reject</button>`);
+  }
+  if (allowed.disable) {
+    buttons.push(`<button type="button" class="cb-btn cb-btn-sm cb-btn-danger" data-act="disable" data-id="${id}">Disable</button>`);
+  }
+  if (allowed.enable) {
+    buttons.push(`<button type="button" class="cb-btn cb-btn-sm cb-btn-in" data-act="enable" data-id="${id}">Re-enable</button>`);
+  }
+  if (allowed.promote) {
     buttons.push(
-      `<button type="button" class="cb-btn cb-btn-sm cb-btn-in" data-act="approve" data-id="${esc(user.id)}">Approve</button>`
-    );
-    buttons.push(
-      `<button type="button" class="cb-btn cb-btn-sm cb-btn-outline" data-act="reject" data-id="${esc(user.id)}">Reject</button>`
+      `<button type="button" class="cb-btn cb-btn-sm cb-btn-outline" data-act="role" data-id="${id}" data-role="${roleAfter('promote')}">Make Manager</button>`
     );
   }
-
-  if (user.status === STATUS_ACTIVE) {
+  if (allowed.demote) {
     buttons.push(
-      `<button type="button" class="cb-btn cb-btn-sm cb-btn-danger" data-act="disable" data-id="${esc(user.id)}">Disable</button>`
+      `<button type="button" class="cb-btn cb-btn-sm cb-btn-outline" data-act="role" data-id="${id}" data-role="${roleAfter('demote')}">Make Staff</button>`
     );
-  }
-
-  if (user.status === STATUS_DISABLED) {
-    buttons.push(
-      `<button type="button" class="cb-btn cb-btn-sm cb-btn-in" data-act="enable" data-id="${esc(user.id)}">Re-enable</button>`
-    );
-  }
-
-  // Only the webmaster may grant or remove general_manager. A general
-  // manager can still move staff around, but cannot create a second manager
-  // or demote the one the client depends on.
-  if (user.status !== STATUS_PENDING) {
-    if (canChangeManagerRole()) {
-      const next =
-        user.role === ROLE_GENERAL_MANAGER ? ROLE_PRODUCTION_STAFF : ROLE_GENERAL_MANAGER;
-      buttons.push(
-        `<button type="button" class="cb-btn cb-btn-sm cb-btn-outline" data-act="role" data-id="${esc(user.id)}" data-role="${next}">
-           ${user.role === ROLE_GENERAL_MANAGER ? 'Make Staff' : 'Make Manager'}
-         </button>`
-      );
-    }
   }
 
   return buttons.length

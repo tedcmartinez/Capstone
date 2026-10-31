@@ -510,100 +510,188 @@ describe('what staff may change on a material', () => {
 });
 
 // ============================================================
-// 8 and 9. ONLY THE WEBMASTER TOUCHES MANAGER ROLES
+// 8 and 9. WHO MAY CHANGE WHOSE ACCOUNT
+//
+//   Webmaster   every account except its own: approve, disable,
+//               re-enable, promote staff to manager, demote back.
+//   Manager     approve, disable, re-enable and demote other managers and
+//               staff, but never promote anyone to manager, and never
+//               touch the webmaster.
+//   Everyone    never their own role or status.
 // ============================================================
 
-describe('role escalation', () => {
-  it('8. a manager granting general_manager is denied', async () => {
+async function seedWebmaster() {
+  await seedUser(env, 'uid_webmaster', { role: 'webmaster', email: WEBMASTER_EMAIL });
+}
+
+const asGM = () => asUser(env, 'uid_gm', 'gm@example.com');
+const asWM = () => asWebmaster(env, true);
+
+describe('what a manager may do to other accounts', () => {
+  beforeEach(async () => {
     await seedActiveGM(env, 'uid_gm');
-    await seedActiveStaff(env, 'uid_staff');
-
-    const db = asUser(env, 'uid_gm', 'gm@example.com');
-
-    await assertFails(
-      auditedUpdate(db, 'uid_gm', ['users', 'uid_staff'], {
-        role: 'general_manager',
-      })
-    );
   });
 
-  it('8. the webmaster can grant general_manager', async () => {
-    await seedUser(env, 'uid_webmaster', {
-      role: 'webmaster',
-      email: WEBMASTER_EMAIL,
-    });
-    await seedActiveStaff(env, 'uid_staff');
-
-    const db = asWebmaster(env, true);
-
-    await assertSucceeds(
-      auditedUpdate(db, 'uid_webmaster', ['users', 'uid_staff'], {
-        role: 'general_manager',
-      })
-    );
-  });
-
-  it('8. a manager cannot demote another manager', async () => {
-    await seedActiveGM(env, 'uid_gm');
+  it('8. a manager disabling another manager is allowed', async () => {
     await seedActiveGM(env, 'uid_gm2');
 
-    const db = asUser(env, 'uid_gm', 'gm@example.com');
-
-    await assertFails(
-      auditedUpdate(db, 'uid_gm', ['users', 'uid_gm2'], {
-        role: 'production_staff',
-      })
+    await assertSucceeds(
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_gm2'], { status: 'disabled' })
     );
   });
 
-  it('9. a manager cannot edit or disable the webmaster', async () => {
-    await seedActiveGM(env, 'uid_gm');
-    await seedUser(env, 'uid_webmaster', {
-      role: 'webmaster',
-      email: WEBMASTER_EMAIL,
-    });
+  it('8. a manager re-enabling another manager is allowed, and is not a promotion', async () => {
+    // The role stays general_manager throughout, so nothing is granted
+    await seedUser(env, 'uid_gm2', { role: 'general_manager', status: 'disabled' });
 
-    const db = asUser(env, 'uid_gm', 'gm@example.com');
-
-    await assertFails(
-      auditedUpdate(db, 'uid_gm', ['users', 'uid_webmaster'], {
-        status: 'disabled',
-      })
-    );
-    await assertFails(
-      auditedUpdate(db, 'uid_gm', ['users', 'uid_webmaster'], {
-        role: 'production_staff',
-      })
+    await assertSucceeds(
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_gm2'], { status: 'active' })
     );
   });
 
-  it('9. staff cannot disable anybody', async () => {
+  it('8. a manager demoting another manager to staff is allowed', async () => {
+    await seedActiveGM(env, 'uid_gm2');
+
+    await assertSucceeds(
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_gm2'], { role: 'production_staff' })
+    );
+  });
+
+  it('8. a manager promoting staff to manager is denied', async () => {
     await seedActiveStaff(env, 'uid_staff');
-    await seedActiveGM(env, 'uid_gm');
-
-    const db = asUser(env, 'uid_staff', 'staff@example.com');
 
     await assertFails(
-      auditedUpdate(db, 'uid_staff', ['users', 'uid_gm'], {
-        status: 'disabled',
-      })
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_staff'], { role: 'general_manager' })
     );
   });
 
-  it('nobody can approve or promote themselves', async () => {
-    await seedPendingStaff(env, 'uid_self');
-    const db = asUser(env, 'uid_self', 'self@example.com');
+  it('8. a manager promoting a pending account to manager is denied', async () => {
+    // Approving and promoting in one write would be a promotion by another route
+    await seedPendingStaff(env, 'uid_new');
 
     await assertFails(
-      auditedUpdate(db, 'uid_self', ['users', 'uid_self'], {
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_new'], {
+        role: 'general_manager',
         status: 'active',
       })
     );
-    await assertFails(
-      auditedUpdate(db, 'uid_self', ['users', 'uid_self'], {
-        role: 'general_manager',
+  });
+
+  it('a manager may still approve, disable and re-enable staff', async () => {
+    await seedPendingStaff(env, 'uid_new');
+    await seedActiveStaff(env, 'uid_staff');
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+
+    await assertSucceeds(
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_new'], {
+        status: 'active',
+        approvedBy: 'uid_gm',
+        approvedAt: serverTimestamp(),
       })
     );
+    await assertSucceeds(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_staff'], { status: 'disabled' }));
+    await assertSucceeds(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_off'], { status: 'active' }));
+  });
+
+  it('9. a manager editing the webmaster in any way is denied', async () => {
+    await seedWebmaster();
+
+    for (const change of [
+      { status: 'disabled' },
+      { role: 'production_staff' },
+      { role: 'general_manager' },
+      { approvedBy: 'uid_gm' },
+    ]) {
+      await assertFails(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_webmaster'], change));
+    }
+  });
+
+  it('nobody may give an account a role or status the system does not know', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+
+    await assertFails(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_staff'], { role: 'owner' }));
+    await assertFails(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_staff'], { status: 'banned' }));
+  });
+
+  it('nobody may make an account the webmaster', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+    await seedWebmaster();
+
+    await assertFails(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_staff'], { role: 'webmaster' }));
+    await assertFails(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_staff'], { role: 'webmaster' })
+    );
+  });
+
+  it('9. staff cannot change anybody', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+    await seedActiveStaff(env, 'uid_staff2');
+    const db = asUser(env, 'uid_staff', 'staff@example.com');
+
+    await assertFails(auditedUpdate(db, 'uid_staff', ['users', 'uid_gm'], { status: 'disabled' }));
+    await assertFails(auditedUpdate(db, 'uid_staff', ['users', 'uid_staff2'], { status: 'disabled' }));
+  });
+});
+
+describe('what the webmaster may do to other accounts', () => {
+  beforeEach(async () => {
+    await seedWebmaster();
+  });
+
+  it('8. the webmaster promoting staff to manager is allowed', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+
+    await assertSucceeds(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_staff'], { role: 'general_manager' })
+    );
+  });
+
+  it('the webmaster demoting a manager to staff is allowed', async () => {
+    await seedActiveGM(env, 'uid_gm');
+
+    await assertSucceeds(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_gm'], { role: 'production_staff' })
+    );
+  });
+
+  it('the webmaster may approve, disable and re-enable any other account', async () => {
+    await seedPendingStaff(env, 'uid_new');
+    await seedActiveGM(env, 'uid_gm');
+    await seedUser(env, 'uid_off', { role: 'general_manager', status: 'disabled' });
+
+    await assertSucceeds(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_new'], {
+        status: 'active',
+        approvedBy: 'uid_webmaster',
+        approvedAt: serverTimestamp(),
+      })
+    );
+    await assertSucceeds(auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_gm'], { status: 'disabled' }));
+    await assertSucceeds(auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_off'], { status: 'active' }));
+  });
+});
+
+describe('nobody may change their own role or status', () => {
+  it('staff, including approving themselves or claiming manager', async () => {
+    await seedPendingStaff(env, 'uid_self');
+    const db = asUser(env, 'uid_self', 'self@example.com');
+
+    await assertFails(auditedUpdate(db, 'uid_self', ['users', 'uid_self'], { status: 'active' }));
+    await assertFails(auditedUpdate(db, 'uid_self', ['users', 'uid_self'], { role: 'general_manager' }));
+  });
+
+  it('a manager, including disabling or demoting themselves', async () => {
+    await seedActiveGM(env, 'uid_gm');
+
+    await assertFails(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_gm'], { status: 'disabled' }));
+    await assertFails(auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_gm'], { role: 'production_staff' }));
+  });
+
+  it('the webmaster, including disabling or demoting themselves', async () => {
+    await seedWebmaster();
+
+    await assertFails(auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_webmaster'], { status: 'disabled' }));
+    await assertFails(auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_webmaster'], { role: 'general_manager' }));
   });
 
   it('a user may still update their own profile details', async () => {
@@ -943,5 +1031,77 @@ describe('unknown collections', () => {
 
     await assertFails(getDocs(collection(db, 'categories')));
     await assertFails(setDoc(doc(db, 'anything_else', 'x'), { a: 1 }));
+  });
+});
+
+// ============================================================
+// STOCK ADJUSTMENTS: MANAGER AND WEBMASTER ONLY
+// The catalog offers Adjust Stock to both; these prove the server agrees,
+// and refuses staff whatever the page might draw.
+// ============================================================
+
+describe('stock adjustments', () => {
+  beforeEach(async () => {
+    await seedDoc(env, 'materials', 'mat_1', {
+      name: 'Mahogany Plank',
+      stockQuantity: 18,
+      minThreshold: 30,
+      unit: 'pcs',
+      isArchived: false,
+    });
+  });
+
+  // The batch the Adjust Stock modal writes: counted 15 against 18
+  function adjustment(db, uid) {
+    const auditId = nextAuditId();
+    const movementId = `mv_adjust_${auditId}`;
+    const batch = writeBatch(db);
+
+    batch.set(doc(db, 'stock_movements', movementId), {
+      materialId: 'mat_1',
+      materialName: 'Mahogany Plank',
+      type: 'adjust',
+      quantity: 3,
+      difference: -3,
+      beforeQty: 18,
+      afterQty: 15,
+      movementDate: '2026-11-01',
+      reason: 'Physical Count',
+      reference: '',
+      notes: '',
+      receiptId: null,
+      loggedBy: uid,
+      loggedByName: 'Seeded User',
+      createdAt: serverTimestamp(),
+      lastAuditId: auditId,
+    });
+    batch.update(doc(db, 'materials', 'mat_1'), {
+      stockQuantity: 15,
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+      lastMovementId: movementId,
+      lastAuditId: auditId,
+    });
+    batch.set(doc(db, 'audit_logs', auditId), auditEntry(uid, {
+      action: 'stock.adjust',
+      entity: 'stock_movements',
+    }));
+
+    return batch.commit();
+  }
+
+  it('a general manager may adjust stock', async () => {
+    await seedActiveGM(env, 'uid_gm');
+    await assertSucceeds(adjustment(asUser(env, 'uid_gm', 'gm@example.com'), 'uid_gm'));
+  });
+
+  it('the webmaster may adjust stock', async () => {
+    await seedUser(env, 'uid_webmaster', { role: 'webmaster', email: WEBMASTER_EMAIL });
+    await assertSucceeds(adjustment(asWebmaster(env, true), 'uid_webmaster'));
+  });
+
+  it('production staff may not adjust stock', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+    await assertFails(adjustment(asUser(env, 'uid_staff', 'staff@example.com'), 'uid_staff'));
   });
 });

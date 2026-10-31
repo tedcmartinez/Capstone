@@ -95,8 +95,12 @@ Nobody's account is created for them. Each person registers themselves with Goog
 | Role | Can do |
 |---|---|
 | Production staff | Log stock in and out, view the catalog and movement history, add materials. Never sees cost, supplier, reports, settings or the audit trail. |
-| General manager | Everything staff can, plus costs and suppliers, editing and archiving materials, stock adjustments, the dashboard and reports, approving and disabling accounts, and the audit trail. |
-| Webmaster | Everything a manager can, plus granting and removing the manager role. Nobody can edit the webmaster's account. |
+| General manager | Everything staff can, plus costs and suppliers, editing and archiving materials, stock adjustments, the dashboard and reports, and the audit trail. Can approve, disable and re-enable accounts, including other managers', and demote a manager to staff. Cannot promote anyone to manager. |
+| Webmaster | Everything a manager can, plus promoting staff to manager. |
+
+Two rules apply to everyone, the webmaster included: nobody can change their own role or status, and nobody can change the webmaster's account.
+
+Only the webmaster can make someone a manager. That keeps the shop from being locked out: if every manager were removed or demoted, the webmaster could still appoint a new one.
 
 The webmaster is whoever signs in with the verified address `tedcmartinez2@gmail.com`. This is the only identity written into the system, and only as an email address, never a password. It appears in two places that must always match: `WEBMASTER_EMAIL` in `app-firebase/src/lib/config.js`, and `isWebmaster()` in `firestore.rules`.
 

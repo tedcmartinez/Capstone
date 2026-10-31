@@ -234,9 +234,10 @@ function rolesCard() {
     ['Adjust stock to a counted figure', false, true, true],
     ['See cost and supplier', false, true, true],
     ['View dashboard and reports', false, true, true],
-    ['Approve and disable accounts', false, true, true],
+    ['Approve, disable and re-enable accounts', false, true, true],
+    ['Demote a manager to staff', false, true, true],
+    ['Promote staff to manager', false, false, true],
     ['View and export the audit trail', false, true, true],
-    ['Grant or remove the manager role', false, false, true],
   ];
 
   const mark = (allowed) =>
@@ -277,6 +278,10 @@ function rolesCard() {
                 .join('')}
             </tbody>
           </table>
+        </div>
+        <div class="cb-help px-3 pb-3 pt-2">
+          Nobody can change their own role or status, and nobody can change
+          the webmaster's account.
         </div>
       </div>
     </div>`;

@@ -74,9 +74,12 @@ export const isStaffMember = () =>
 // Anyone approved to use the system at all
 export const canUseApp = () => isActive();
 
-// Only the webmaster may grant or remove general_manager, so the client can
-// never be locked out of their own system by a manager being removed.
-export const canChangeManagerRole = () => isWebmaster();
+// Only the webmaster may make someone a general manager, so the client can
+// never be locked out of their own system: if every manager were removed,
+// the webmaster could still appoint one. Removing the role, by contrast, is
+// open to managers too. The full set of account permissions is in
+// lib/accounts.js, which mirrors firestore.rules.
+export const canPromoteToManager = () => isWebmaster();
 
 // ============================================================
 // INITIALS
