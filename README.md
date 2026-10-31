@@ -8,7 +8,7 @@ It runs entirely on Google's free tiers: Firebase Authentication, Cloud Firestor
 
 This replaces an earlier LAN-based version built in PHP and MySQL on XAMPP. That version is kept in `legacy-php/` for reference, and the commit tagged `v1-lan-php` is the version as originally submitted.
 
-> **Status:** migration in progress. This README covers what has been built and configured so far. Hosting, installing the app on the company desktop, the data migration, the free tier limits and the full acceptance checklist are added in step 12.
+> **Status:** migration in progress. This README covers what has been built and configured so far. Hosting, installing the app on the company desktop, the free tier limits and the full acceptance checklist are added in step 12.
 
 ## What is in this repository
 
@@ -19,6 +19,7 @@ This replaces an earlier LAN-based version built in PHP and MySQL on XAMPP. That
 | `firestore.rules` | The access rules. These, not the interface, are what decide who may read or change what. |
 | `firestore.indexes.json` | The database indexes the app's filters need. |
 | `tests/` | Unit, security rules and end-to-end tests. |
+| `tools/migrate/` | The one-off data migration from the LAN version. It has its own [guide](tools/migrate/README.md). |
 | `tools/` | Development helpers. |
 | `legacy-php/` | The original LAN version, for reference only. |
 
@@ -130,12 +131,15 @@ Low-stock and stock-out alerts and the reorder checklist are sent by a Google Ap
 
 Until the script is connected, the app records stock movements as normal and says plainly that no alert was sent.
 
+## Moving the data across from the LAN version
+
+Suppliers, materials and stock movements are copied from the old MySQL database by a script in `tools/migrate/`, run once on the day the shop switches over. User accounts are not carried across: everyone registers again. The steps, including rehearsing against the emulator first, are in [tools/migrate/README.md](tools/migrate/README.md).
+
 ## Still to be documented
 
 Added in step 12 of the migration:
 
 - Deploying to Firebase Hosting
 - Installing the app on the company desktop as a standalone window
-- Migrating the data from the LAN version's MySQL database
 - What the free tier allows, and what happens when a limit is reached
 - The full acceptance checklist, including the manual checks

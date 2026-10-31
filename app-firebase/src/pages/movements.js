@@ -372,6 +372,14 @@ function beforeAfterNote(movement) {
     return `<div class="cb-cell-sub">System said ${before}, counted ${after}</div>`;
   }
 
+  // A movement brought across from the LAN version. That system recorded
+  // the quantity moved but not the totals either side, so these were worked
+  // out during the migration, backwards from the stock figure it held.
+  // Nobody saw them on a screen, so the label says where they came from.
+  if (movement.source === 'lan-migration') {
+    return `<div class="cb-cell-sub">${before} to ${after}, worked out from the LAN records</div>`;
+  }
+
   return `<div class="cb-cell-sub">${before} to ${after} on screen</div>`;
 }
 

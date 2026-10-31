@@ -108,6 +108,13 @@ export const RECEIPT_MAX_BYTES = 300 * 1000;
 export const RECEIPT_MAX_DIMENSION = 1280;
 export const RECEIPT_JPEG_QUALITY = 0.7;
 
+// The JPEG quality settings tried in turn, starting from the one above. Most
+// receipts are text on white paper and fit at the first; a dense photograph
+// needs a lower one. Anything still over the limit after the last is refused.
+// Shared by the browser and by the data migration, so an old receipt brought
+// across from the LAN version is treated exactly like a new upload.
+export const RECEIPT_QUALITY_STEPS = [RECEIPT_JPEG_QUALITY, 0.6, 0.5, 0.4];
+
 // ============================================================
 // PAGINATION
 // ============================================================

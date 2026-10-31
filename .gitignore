@@ -34,3 +34,13 @@ ui-debug.log
 *.log
 .DS_Store
 Thumbs.db
+
+# ============================================================
+# Data migration
+# The dump is the client's real catalog, and the plan is built from it.
+# Neither belongs in version control. Only the empty folders are kept.
+# ============================================================
+tools/migrate/input/*
+!tools/migrate/input/.gitkeep
+tools/migrate/output/*
+!tools/migrate/output/.gitkeep

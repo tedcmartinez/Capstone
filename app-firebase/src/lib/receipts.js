@@ -20,18 +20,16 @@ import { currentUser } from './session.js';
 import {
   RECEIPT_MAX_BYTES,
   RECEIPT_MAX_DIMENSION,
-  RECEIPT_JPEG_QUALITY,
+  RECEIPT_QUALITY_STEPS,
 } from './config.js';
 
 // The formats the old PHP upload accepted, checked by real content type
 // rather than by file extension.
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-// Quality steps tried in order. Most receipts are text on white paper and
-// come out well under the ceiling at the first step; a dense photograph
-// needs a lower setting. Anything still too large after the last step is
-// refused rather than stored.
-const QUALITY_STEPS = [RECEIPT_JPEG_QUALITY, 0.6, 0.5, 0.4];
+// The quality steps tried in order are RECEIPT_QUALITY_STEPS in config.js,
+// shared with the data migration.
+const QUALITY_STEPS = RECEIPT_QUALITY_STEPS;
 
 // ============================================================
 // COMPRESSION

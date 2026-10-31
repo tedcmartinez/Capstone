@@ -31,30 +31,17 @@ import { PAGE_SIZE } from './config.js';
 // matches what a new record can say.
 // ============================================================
 
-export function allowedReasons(type) {
-  if (type === 'in') return ['Purchase', 'Restock', 'Return', 'Correction'];
-  if (type === 'out') return ['Project Usage', 'Damaged', 'Transfer', 'Other'];
-
-  // Adjustments. A reason is required rather than optional, because an
-  // adjustment overrides a figure the recorded movements do not account
-  // for, and six months later somebody will want to know why.
-  return ['Physical Count', 'Damage Found', 'Loss or Theft', 'Data Correction'];
-}
+// The reason lists live in reasons.js, which has no Firebase imports, so the
+// data migration can read exactly the same lists. Re-exported here so the
+// rest of the app keeps importing them from where it always has.
+export { allowedReasons, REASON_LABELS, reasonLabel } from './reasons.js';
+import { reasonLabel } from './reasons.js';
 
 // The three kinds of movement, as the history and the reports label them
 export const MOVEMENT_TYPES = ['in', 'out', 'adjust'];
 
 export function movementTypeLabel(type) {
   return { in: 'IN', out: 'OUT', adjust: 'ADJUST' }[type] || type;
-}
-
-// The dropdown showed "Stock Correction" while storing "Correction"
-export const REASON_LABELS = {
-  Correction: 'Stock Correction',
-};
-
-export function reasonLabel(reason) {
-  return REASON_LABELS[reason] || reason;
 }
 
 // ============================================================
