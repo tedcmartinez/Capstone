@@ -26,6 +26,7 @@ import {
 import { db } from './firebase.js';
 import { APP_VERSION } from './config.js';
 import { currentUser } from './session.js';
+import { settleOrQueue, CONFIRMED } from './sync.js';
 
 // ============================================================
 // IDS
@@ -91,9 +92,17 @@ function buildEntry(entry) {
 // Pass an empty ops list to record something that changes no document, which
 // is how signing in and signing out are logged.
 //
-// Returns the audit entry id, which callers occasionally need: a stock-in
-// uses it to tie a receipt image to the same entry.
-export async function auditedWrite(ops, entry) {
+// Returns { auditId, status }.
+//
+// options.track, when given a description of the change, means the write is
+// followed rather than waited on indefinitely. Stock movements use it,
+// because they must be enterable while the office connection is down: see
+// the explanation in lib/sync.js. status then says whether the server has
+// confirmed the write or it is still queued.
+//
+// Without options.track the behaviour is unchanged: the write is awaited
+// and a refusal is thrown to the caller.
+export async function auditedWrite(ops, entry, options = {}) {
   const auditId = newAuditId();
   const batch = writeBatch(db);
 
@@ -114,8 +123,13 @@ export async function auditedWrite(ops, entry) {
 
   batch.set(doc(db, 'audit_logs', auditId), buildEntry(entry));
 
+  if (options.track) {
+    const outcome = await settleOrQueue(batch.commit(), options.track);
+    return { auditId, status: outcome.status };
+  }
+
   await batch.commit();
-  return auditId;
+  return { auditId, status: CONFIRMED };
 }
 
 // ============================================================

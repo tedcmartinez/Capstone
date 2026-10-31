@@ -271,3 +271,59 @@
 .cb-card-foot .cb-help {
     max-width: 60ch;
 }
+
+/* ============================================================
+   7. SYNC BANNER
+   Sits under the top bar when an entry is waiting to reach the
+   server, or has been refused by it. The failed state is red
+   and cannot be missed, because the entry has to be made again.
+   ============================================================ */
+
+.cb-sync-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--cb-border);
+    font-size: 13px;
+}
+
+.cb-sync-banner.is-pending {
+    background-color: var(--cb-amber-bg);
+    color: var(--cb-amber);
+}
+
+.cb-sync-banner.is-failed {
+    background-color: var(--cb-red-bg);
+    color: var(--cb-red);
+}
+
+.cb-sync-text {
+    flex: 1;
+    line-height: 1.6;
+}
+
+.cb-sync-list {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}
+
+.cb-sync-list li {
+    margin-bottom: 4px;
+}
+
+.cb-sync-what {
+    display: block;
+    font-weight: 600;
+    color: var(--cb-text);
+}
+
+.cb-sync-why {
+    display: block;
+    color: var(--cb-muted);
+    font-size: 12px;
+}
+
+@media print {
+    .cb-sync-banner { display: none; }
+}

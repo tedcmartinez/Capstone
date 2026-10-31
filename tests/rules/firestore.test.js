@@ -247,6 +247,9 @@ describe('approval unlocks the system', () => {
       stockQuantity: 13,
       updatedAt: serverTimestamp(),
       updatedBy: 'uid_staff',
+      // Names the movement that justifies the new figure. The rules check it
+      // matches, started from the quantity the server holds, and adds up.
+      lastMovementId: 'mv_1',
       lastAuditId: auditId,
     });
     batch.set(doc(db, 'audit_logs', auditId), auditEntry('uid_staff', {
@@ -414,14 +417,45 @@ describe('what staff may change on a material', () => {
     );
   });
 
-  it('staff may change the stock quantity, which is what a movement does', async () => {
+  it('staff cannot change the stock quantity on its own', async () => {
+    // A quantity is the result of recorded movements, so it may only change
+    // in a batch that also files the movement explaining it. Without that,
+    // a figure could be rewritten with no record of who moved what. The
+    // movement-backed path is covered in tests/integration/stale-write.
     const db = asUser(env, 'uid_staff', 'staff@example.com');
 
-    await assertSucceeds(
+    await assertFails(
       auditedUpdate(db, 'uid_staff', ['materials', 'mat_1'], {
         stockQuantity: 13,
         updatedAt: serverTimestamp(),
         updatedBy: 'uid_staff',
+      })
+    );
+  });
+
+  it('a manager cannot change the stock quantity on its own either', async () => {
+    await seedActiveGM(env, 'uid_gm');
+    const db = asUser(env, 'uid_gm', 'gm@example.com');
+
+    await assertFails(
+      auditedUpdate(db, 'uid_gm', ['materials', 'mat_1'], {
+        stockQuantity: 999,
+        updatedAt: serverTimestamp(),
+        updatedBy: 'uid_gm',
+      })
+    );
+  });
+
+  it('a manager may still edit the catalog, which leaves the quantity alone', async () => {
+    await seedActiveGM(env, 'uid_gm');
+    const db = asUser(env, 'uid_gm', 'gm@example.com');
+
+    await assertSucceeds(
+      auditedUpdate(db, 'uid_gm', ['materials', 'mat_1'], {
+        name: 'Mahogany Plank, Premium',
+        minThreshold: 35,
+        updatedAt: serverTimestamp(),
+        updatedBy: 'uid_gm',
       })
     );
   });
@@ -744,6 +778,7 @@ describe('stock movements', () => {
       stockQuantity: afterQty,
       updatedAt: serverTimestamp(),
       updatedBy: uid,
+      lastMovementId: `mv_${auditId}`,
       lastAuditId: auditId,
     });
     batch.set(doc(db, 'audit_logs', auditId), auditEntry(uid, {

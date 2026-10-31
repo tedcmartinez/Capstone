@@ -19,6 +19,13 @@ import {
   isManager,
 } from '../lib/session.js';
 import { COMPANY_NAME } from '../lib/config.js';
+import {
+  onSyncChange,
+  failureList,
+  pendingList,
+  dismissFailure,
+  dismissAllFailures,
+} from '../lib/sync.js';
 
 // ============================================================
 // ICONS
@@ -255,6 +262,92 @@ function topbar(lowStock) {
 }
 
 // ============================================================
+// THE SYNC BANNER
+//
+// A write that was reported as saved and then refused by the server must not
+// disappear quietly. This strip sits directly under the top bar on every
+// page, so the person who entered the movement sees it wherever they have
+// navigated to since.
+//
+// It is deliberately not dismissable in one click when a failure is listed:
+// the entry has to be made again, and the notice says so by name, because
+// "something failed" is no use to somebody holding a delivery receipt.
+// ============================================================
+
+function syncBannerHtml({ pending, failures }) {
+  if (failures.length === 0 && pending.length === 0) return '';
+
+  if (failures.length > 0) {
+    const count = failures.length;
+
+    return `
+      <div class="cb-sync-banner is-failed" role="alert">
+        <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="flex-shrink:0;">
+          ${icons.warning}
+        </svg>
+        <div class="cb-sync-text">
+          <strong>
+            ${count} ${count === 1 ? 'entry' : 'entries'} failed to sync and
+            ${count === 1 ? 'was' : 'were'} not saved. Please enter
+            ${count === 1 ? 'it' : 'them'} again.
+          </strong>
+          <ul class="cb-sync-list">
+            ${failures
+              .map(
+                (failure) => `
+              <li>
+                <span class="cb-sync-what">${esc(failure.description)}</span>
+                <span class="cb-sync-why">${esc(failure.reason)}</span>
+              </li>`
+              )
+              .join('')}
+          </ul>
+        </div>
+        <button type="button" class="cb-btn cb-btn-outline cb-btn-sm" id="cbSyncDismiss">
+          I have re-entered ${count === 1 ? 'it' : 'them'}
+        </button>
+      </div>`;
+  }
+
+  const count = pending.length;
+  return `
+    <div class="cb-sync-banner is-pending" role="status">
+      <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="flex-shrink:0;">
+        <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/>
+        <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/>
+      </svg>
+      <div class="cb-sync-text">
+        ${count} ${count === 1 ? 'entry is' : 'entries are'} saved on this
+        computer and waiting to reach the server.
+      </div>
+    </div>`;
+}
+
+// Redraws the banner in place. Called on every change the tracker reports,
+// so it appears the moment a queued write is refused, even if the user has
+// moved to another page since.
+function renderSyncBanner() {
+  const target = document.getElementById('cbSyncBanner');
+  if (!target) return;
+
+  target.innerHTML = syncBannerHtml({ pending: pendingList(), failures: failureList() });
+
+  document.getElementById('cbSyncDismiss')?.addEventListener('click', () => {
+    dismissAllFailures();
+  });
+}
+
+// Subscribed once, for the life of the page, rather than per render, so the
+// notice survives navigation between pages.
+let syncSubscribed = false;
+
+function subscribeToSync() {
+  if (syncSubscribed) return;
+  syncSubscribed = true;
+  onSyncChange(() => renderSyncBanner());
+}
+
+// ============================================================
 // MOUNTING
 // ============================================================
 
@@ -274,14 +367,19 @@ export function mountShell({ lowStock = [] } = {}) {
         ${sidebar(current, lowStock.length)}
         <div class="cb-main">
           ${topbar(lowStock)}
+          <div id="cbSyncBanner"></div>
           <div class="cb-content" id="cbContent"></div>
         </div>
       </div>`;
     mounted = true;
     wireShell();
+    renderSyncBanner();
   } else {
     refreshActiveLink(current);
+    renderSyncBanner();
   }
+
+  subscribeToSync();
 
   return document.getElementById('cbContent');
 }

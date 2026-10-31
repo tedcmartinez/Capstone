@@ -57,21 +57,33 @@ export function reasonLabel(reason) {
 // log a withdrawal whenever the office internet drops. That is acceptance
 // test 17, and it is the more important of the two.
 //
-// So this uses a batch, which does queue offline, and the safety comes from
-// three places instead:
-//   1. beforeQty and afterQty are both written, so every movement carries
-//      the arithmetic it performed and the trail can be checked.
-//   2. firestore.rules refuses any movement whose afterQty is below zero,
-//      and refuses any material update that would set a negative quantity.
-//      So the server, not the browser, is what makes overselling impossible.
-//   3. The alert email is sent by the Apps Script, which reads the real
-//      quantity from Firestore rather than believing anything sent here.
+// So this uses a batch, which does queue offline, and the checking that a
+// transaction would have done is moved into firestore.rules instead:
 //
-// What this gives up: if two people withdraw the same material at the same
-// moment, both reading the same starting figure, the second write can land
-// on a quantity that has already moved. In a one-desktop shop that is close
-// to impossible, and the movement records make it visible if it ever does.
-// A transaction would trade that for losing offline entry altogether.
+//   1. beforeQty must equal the quantity the server actually holds at the
+//      moment the batch is applied. This is the important one. It means a
+//      movement calculated from an out-of-date copy of the material is
+//      refused rather than written, so a stale figure cannot produce a
+//      wrong total. Two people working from the same starting number
+//      cannot both succeed: the first moves the server's value and the
+//      second no longer matches it.
+//   2. The arithmetic must hold: afterQty must be beforeQty plus the
+//      quantity for a stock-in, or minus it for a stock-out, and the
+//      material must be left holding exactly afterQty.
+//   3. afterQty may not be negative, which is what stops a withdrawal
+//      larger than the stock on hand.
+//   4. A material's quantity may not change at all except through a
+//      movement created in the same batch, so no figure can be rewritten
+//      without a record of who moved what.
+//
+// The alert email is sent by the Apps Script, which reads the real quantity
+// from Firestore rather than believing anything sent from here.
+//
+// What this still gives up compared with a transaction: a refused write is
+// discovered after the fact rather than retried automatically. An entry
+// typed offline against a figure that has since moved will be rejected when
+// it finally reaches the server, and has to be entered again. The user is
+// told, by name, which entry failed and why: see lib/sync.js.
 // ============================================================
 
 export async function logMovement({ type, material, quantity, reason, reference, notes, receipt }) {
@@ -126,27 +138,57 @@ export async function logMovement({ type, material, quantity, reason, reference,
 
   ops.push({ type: 'set', collection: 'stock_movements', id: movementId, data: movement });
 
-  // The running total on the material. This is the only field a staff
-  // member may change on a material, and only through this path.
+  // The running total on the material. This is the only field a movement
+  // may change on a material, and a movement is the only thing that may
+  // change it at all.
+  //
+  // lastMovementId names the movement that justifies the new figure. The
+  // rules read it to check that a matching movement is being created in this
+  // same batch, that it started from the quantity the server currently
+  // holds, and that its arithmetic is right. Without it a quantity could be
+  // rewritten with no movement filed to explain it.
   ops.push({
     type: 'update',
     collection: 'materials',
     id: material.id,
-    data: { stockQuantity: afterQty, updatedAt: serverTimestamp(), updatedBy: user.uid },
+    data: {
+      stockQuantity: afterQty,
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+      lastMovementId: movementId,
+    },
   });
 
   if (receiptRef) ops.push(receiptRef.op);
 
-  await auditedWrite(ops, {
-    action: type === 'in' ? 'stock.in' : 'stock.out',
-    entity: 'stock_movements',
-    entityId: movementId,
-    before: { stockQuantity: beforeQty },
-    after: { stockQuantity: afterQty },
-    summary: movementSummary({ type, amount, material, reason, reference }),
-  });
+  const summary = movementSummary({ type, amount, material, reason, reference });
 
-  return { movementId, receiptId: receiptRef?.id || null, beforeQty, afterQty };
+  // Tracked rather than simply awaited. If the server answers promptly the
+  // user gets the usual immediate confirmation, and a refusal is thrown here
+  // so the form can show the real reason. If it does not answer, which is
+  // what happens when the office connection is down, the entry is reported
+  // as queued and followed in the background, so nobody is left waiting on
+  // a frozen button and nothing fails without being noticed.
+  const { status } = await auditedWrite(
+    ops,
+    {
+      action: type === 'in' ? 'stock.in' : 'stock.out',
+      entity: 'stock_movements',
+      entityId: movementId,
+      before: { stockQuantity: beforeQty },
+      after: { stockQuantity: afterQty },
+      summary,
+    },
+    { track: summary }
+  );
+
+  return {
+    movementId,
+    receiptId: receiptRef?.id || null,
+    beforeQty,
+    afterQty,
+    status,
+  };
 }
 
 // "Stock out 20 pcs, Mahogany Plank (Project Usage: order #102)", the shape

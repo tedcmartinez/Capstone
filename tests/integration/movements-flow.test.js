@@ -399,7 +399,22 @@ describe('movement history', () => {
     const plywood = catalog.materials.find((m) => m.name === 'Marine Plywood');
 
     await movementsLib.logMovement({ type: 'in', material: plank, quantity: '5', reason: 'Purchase' });
-    await movementsLib.logMovement({ type: 'out', material: plank, quantity: '2', reason: 'Damaged' });
+
+    // The material must be read again before moving it a second time. Its
+    // quantity has changed, and the rules refuse a movement whose beforeQty
+    // is not the figure the server currently holds. The pages do this by
+    // reloading the catalog after every save; a test that reused the stale
+    // object here would be writing something the app never writes.
+    const plankAgain = (await materialsLib.loadCatalog()).materials.find(
+      (m) => m.name === 'Mahogany Plank'
+    );
+    await movementsLib.logMovement({
+      type: 'out',
+      material: plankAgain,
+      quantity: '2',
+      reason: 'Damaged',
+    });
+
     await movementsLib.logMovement({ type: 'in', material: plywood, quantity: '10', reason: 'Purchase' });
 
     await waitFor(async () => {

@@ -11,6 +11,7 @@ import { allowedReasons, reasonLabel, validateMovement, logMovement } from '../l
 import { compressReceipt, formatSize } from '../lib/receipts.js';
 import { requestStockCheck, describeAlertResult } from '../lib/alerts.js';
 import { RECEIPT_MAX_BYTES } from '../lib/config.js';
+import { QUEUED } from '../lib/sync.js';
 
 // ============================================================
 // FIELDS
@@ -229,19 +230,36 @@ export async function submitStockForm({ form, type, materials, receipt, fixedMat
   const amount = Number(quantity);
   const verb = type === 'in' ? 'added to' : 'removed from';
 
-  const message = {
-    kind: 'success',
-    text:
-      `${amount} ${material.unit} ${verb} ${material.name}. ` +
-      `Stock is now ${result.afterQty} ${material.unit}.` +
-      (result.receiptId ? ' The receipt image was attached.' : ''),
-  };
+  // The wording depends on whether the server has actually taken it. Saying
+  // "saved" for a write that is still queued would be a claim the system
+  // cannot stand behind, and if that write is later refused the user needs
+  // to recognise which entry the failure notice is about.
+  const message =
+    result.status === QUEUED
+      ? {
+          kind: 'info',
+          text:
+            `${amount} ${material.unit} ${verb} ${material.name}, saved on this ` +
+            'computer and waiting to reach the server. It will sync when the ' +
+            'connection returns, and you will be told here if it does not.',
+        }
+      : {
+          kind: 'success',
+          text:
+            `${amount} ${material.unit} ${verb} ${material.name}. ` +
+            `Stock is now ${result.afterQty} ${material.unit}.` +
+            (result.receiptId ? ' The receipt image was attached.' : ''),
+        };
 
   // Only a stock-out can take a material below its threshold, so that is
   // the only case where the alert check runs. This mirrors the PHP version,
   // which called checkAndNotify() after a stock-out and nowhere else.
+  // The alert service reads the material from Firestore itself, so there is
+  // no point asking it about a movement the server has not accepted yet. A
+  // queued stock-out gets its alert when it syncs, on the next stock-out, or
+  // from the manager noticing it on the dashboard.
   let alertMessage = null;
-  if (type === 'out') {
+  if (type === 'out' && result.status !== QUEUED) {
     const alertResult = await requestStockCheck(material.id);
     alertMessage = describeAlertResult(alertResult, material.name);
   }

@@ -42,6 +42,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/audit_logs/$(id);
     }
 
+    function materialPath(id) {
+      return /databases/$(database)/documents/materials/$(id);
+    }
+
+    function movementPath(id) {
+      return /databases/$(database)/documents/stock_movements/$(id);
+    }
+
     // The webmaster is recognised by email address rather than by a role
     // stored in the database. This is deliberate: it is the recovery path.
     // If the users collection were ever wiped or misconfigured, this check
@@ -133,6 +141,67 @@ service cloud.firestore {
     }
 
     // ========================================================
+    // STOCK ARITHMETIC
+    //
+    // A stock movement is the only thing that may change a material's
+    // quantity, and these functions are what make that true on the server
+    // rather than only in the browser.
+    //
+    // The browser works out the new total from the copy of the material it
+    // holds, which may be out of date: somebody else may have moved the same
+    // material since, or the entry may have been typed while offline. So
+    // none of those figures is taken on trust. A movement is accepted only
+    // if the quantity it claims to have started from is the quantity the
+    // server actually holds at that moment, which is what get() returns
+    // during a batch, before any of the batch is applied.
+    //
+    // That one comparison is what makes a stale write impossible. Two people
+    // working from the same starting figure cannot both succeed: the first
+    // moves the server's value, and the second no longer matches it.
+    // ========================================================
+
+    // The movement's own arithmetic: in adds, out subtracts
+    function movementMathHolds(movement) {
+      return (movement.type == 'in'
+              && movement.afterQty == movement.beforeQty + movement.quantity)
+          || (movement.type == 'out'
+              && movement.afterQty == movement.beforeQty - movement.quantity);
+    }
+
+    // Checked from the movement's side: the quantity it started from must be
+    // the one on the server now, and the material must be left holding
+    // exactly afterQty once this batch commits.
+    function movementAgreesWithMaterial() {
+      let path = materialPath(request.resource.data.materialId);
+
+      return exists(path)
+          && get(path).data.stockQuantity == request.resource.data.beforeQty
+          && existsAfter(path)
+          && getAfter(path).data.stockQuantity == request.resource.data.afterQty;
+    }
+
+    // Checked from the material's side.
+    //
+    // This half closes a gap the first cannot. Without it a quantity could
+    // be rewritten by updating the material alone and never filing a
+    // movement, because nothing would have required a movement document to
+    // exist. Making the material update name the movement that justifies it
+    // means every change to a stock figure has a record of who moved what.
+    function backedByNewMovement(materialId) {
+      let id = request.resource.data.lastMovementId;
+      let path = movementPath(id);
+
+      return id is string
+          && id.size() > 0
+          && !exists(path)
+          && existsAfter(path)
+          && getAfter(path).data.materialId == materialId
+          && getAfter(path).data.beforeQty == resource.data.stockQuantity
+          && getAfter(path).data.afterQty == request.resource.data.stockQuantity
+          && movementMathHolds(getAfter(path).data);
+    }
+
+    // ========================================================
     // USERS
     //
     // Self-registration with manager approval. A new account writes its own
@@ -218,16 +287,28 @@ service cloud.firestore {
             && request.resource.data.minThreshold == 0)
       );
 
-      // Managers edit the catalog freely. Staff may only move the stock
-      // figure, and only through a stock movement, which is what updates
-      // these exact fields. Everything else, including the name, the
-      // threshold and isArchived, is outside their list.
-      allow update: if audited() && (
-        isGM()
-        || (isStaff()
-            && isRealUpdate()
-            && changed().hasOnly(['stockQuantity', 'updatedAt', 'updatedBy', 'lastAuditId'])
-            && request.resource.data.stockQuantity >= 0)
+      // Two quite different kinds of update, and the stock quantity is what
+      // separates them.
+      //
+      // A catalog edit may change the name, category, size, unit, threshold
+      // or notes, and may archive the material, but may NOT touch
+      // stockQuantity. That is deliberate, and it matches the LAN system,
+      // whose Material::update() left the column out on purpose so that
+      // "the totals always stay accurate": a quantity is the result of
+      // recorded movements, not something anybody types over.
+      //
+      // A stock movement may change stockQuantity and nothing else, and only
+      // when a matching movement is created in the same batch. Both roles
+      // may do this, since logging movements is the day-to-day job.
+      allow update: if audited() && isRealUpdate() && (
+        (isGM() && !changed().hasAny(['stockQuantity']))
+        ||
+        (isStaff()
+         && changed().hasOnly(['stockQuantity', 'updatedAt', 'updatedBy',
+                               'lastAuditId', 'lastMovementId'])
+         && request.resource.data.stockQuantity is int
+         && request.resource.data.stockQuantity >= 0
+         && backedByNewMovement(id))
       );
 
       allow delete: if false;
@@ -292,8 +373,11 @@ service cloud.firestore {
         && request.resource.data.type in ['in', 'out']
         && request.resource.data.quantity is int
         && request.resource.data.quantity > 0
+        && request.resource.data.beforeQty is int
         && request.resource.data.afterQty is int
-        && request.resource.data.afterQty >= 0;
+        && request.resource.data.afterQty >= 0
+        && movementMathHolds(request.resource.data)
+        && movementAgreesWithMaterial();
 
       allow update, delete: if false;
     }
