@@ -79,6 +79,25 @@ export const STATUS_ACTIVE = 'active';
 export const STATUS_DISABLED = 'disabled';
 
 // ============================================================
+// EMAIL ALERTS
+//
+// The deployed URL of the Google Apps Script that sends the low-stock and
+// stock-out alerts and the reorder checklist. It is owned by
+// cornerblock.alerts@gmail.com and runs as that account, which is how mail
+// is sent without this app holding any credential: there is no password or
+// app password anywhere in the system.
+//
+// Safe to commit. The URL is only an address, and the script verifies the
+// caller's Firebase ID token and checks they are an active user before it
+// does anything.
+//
+// Filled in once the script is deployed in step 9. While it is empty the app
+// skips the alert call and says so, rather than failing a saved movement.
+// ============================================================
+
+export const APPS_SCRIPT_URL = '';
+
+// ============================================================
 // RECEIPT IMAGES
 // Receipts live inside Firestore documents, and a Firestore document cannot
 // exceed 1 MB. Base64 encoding adds about a third to a file's size, so the

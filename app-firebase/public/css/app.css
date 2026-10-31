@@ -253,3 +253,21 @@
 .cb-link-btn:hover {
     color: var(--cb-brown);
 }
+
+/* ============================================================
+   6. CARD FOOTER
+   The strip below a paginated table holding the Previous and
+   Next buttons. Matches the card header's treatment, a divider
+   above and the same padding, so the card reads as one piece.
+   ============================================================ */
+
+.cb-card-foot {
+    padding: 14px 20px;
+    border-top: 1px solid var(--cb-divider);
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.cb-card-foot .cb-help {
+    max-width: 60ch;
+}

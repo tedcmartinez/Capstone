@@ -33,6 +33,12 @@ import {
 import { isManager } from '../lib/session.js';
 import { allQueryParams, setQuery } from '../lib/router.js';
 import { updateAlerts } from '../ui/shell.js';
+import {
+  stockFormFields,
+  wireSteppers,
+  wireReceiptPicker,
+  submitStockForm,
+} from '../ui/stock-form.js';
 
 // Page state. Held at module level so a redraw after saving keeps the user's
 // filters, which is what the query string did in the PHP version.
@@ -121,6 +127,7 @@ function draw() {
     </div>
 
     ${materialModal(manager, categories)}
+    ${stockModal()}
   `);
 
   wire();
@@ -246,20 +253,21 @@ function row(material, manager) {
       ${manager ? `<td class="text-muted">${esc(material.supplierName) || '-'}</td>` : ''}
       <td>
         <div class="cb-row-actions">
-          <a class="cb-btn cb-btn-outline cb-btn-sm" href="/movements/stockin?material=${esc(material.id)}">
+          <button type="button" class="cb-btn cb-btn-outline cb-btn-sm"
+                  data-move="in" data-id="${esc(material.id)}">
             Stock In
-          </a>
+          </button>
 
           <div class="dropdown">
             <button class="cb-dots" type="button" data-bs-toggle="dropdown" aria-label="More actions">
               <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0m0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0m0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/></svg>
             </button>
             <div class="dropdown-menu dropdown-menu-end cb-dropdown">
-              <a class="dropdown-item" href="/movements/stockin?material=${esc(material.id)}">Stock In</a>
+              <button type="button" class="dropdown-item" data-move="in" data-id="${esc(material.id)}">Stock In</button>
               ${
                 isEmpty
                   ? `<span class="dropdown-item disabled text-muted" title="No stock available">Stock Out</span>`
-                  : `<a class="dropdown-item" href="/movements/stockout?material=${esc(material.id)}">Stock Out</a>`
+                  : `<button type="button" class="dropdown-item" data-move="out" data-id="${esc(material.id)}">Stock Out</button>`
               }
               ${
                 manager
@@ -439,6 +447,7 @@ function wire() {
 
   $('#cbAddMaterial', container)?.addEventListener('click', () => openModal(null));
   $('#cbMaterialForm', container)?.addEventListener('submit', save);
+  $('#cbStockForm', container)?.addEventListener('submit', saveStock);
 }
 
 // Handlers that belong to the table itself. Kept separate because the table
@@ -465,6 +474,10 @@ function wireTable() {
 
   $$('[data-archive]', container).forEach((button) => {
     button.addEventListener('click', () => archive(button.dataset.archive));
+  });
+
+  $$('[data-move]', container).forEach((button) => {
+    button.addEventListener('click', () => openStockModal(button.dataset.move, button.dataset.id));
   });
 }
 
@@ -626,5 +639,131 @@ async function archive(id) {
   } catch (error) {
     message = { kind: 'danger', text: friendlyError(error) };
     draw();
+  }
+}
+
+// ============================================================
+// THE STOCK IN / STOCK OUT MODAL
+//
+// The catalog offers the same form the full pages do, so the user never
+// loses their place in the list. This is exactly how the PHP version worked:
+// a modal per row posting to the same movements route as the page, which
+// kept the validation and the stock arithmetic from drifting apart. Here
+// both share ui/stock-form.js for the same reason.
+// ============================================================
+
+let movingType = 'in';
+let movingMaterial = null;
+let movingReceipt = null;
+
+function stockModal() {
+  return `
+    <div class="modal fade" id="cbStockModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form id="cbStockForm" novalidate>
+            <div class="modal-header">
+              <div>
+                <h5 class="modal-title" id="cbStockTitle">Stock In</h5>
+                <p class="cb-modal-sub" id="cbStockSub"></p>
+              </div>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="cbStockBody"></div>
+            <div class="modal-footer">
+              <button type="button" class="cb-btn cb-btn-outline" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="cb-btn cb-btn-in" id="cbStockSave">Confirm</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>`;
+}
+
+function openStockModal(type, materialId) {
+  movingType = type;
+  movingMaterial = catalog.materials.find((m) => m.id === materialId);
+  movingReceipt = null;
+
+  if (!movingMaterial) return;
+
+  const isIn = type === 'in';
+
+  $('#cbStockTitle', container).textContent = isIn ? 'Stock In' : 'Stock Out';
+  $('#cbStockSub', container).textContent = movingMaterial.name;
+
+  // The fields are built with the material fixed, so the modal shows the
+  // current stock panel instead of a material dropdown.
+  const body = $('#cbStockBody', container);
+  body.innerHTML = stockFormFields(type, catalog.materials, movingMaterial);
+
+  // Stock-out cannot exceed what is on hand, so the stepper is capped. The
+  // rules refuse it as well, but the user should not be able to type a
+  // number that is going to be rejected.
+  const quantity = body.querySelector('input[name="quantity"]');
+  if (!isIn) quantity.max = Number(movingMaterial.stockQuantity) || 0;
+
+  const save = $('#cbStockSave', container);
+  save.textContent = isIn ? 'Confirm Stock In' : 'Confirm Stock Out';
+  save.className = `cb-btn ${isIn ? 'cb-btn-in' : 'cb-btn-out'}`;
+  save.disabled = false;
+
+  const form = $('#cbStockForm', container);
+  wireSteppers(form);
+  wireReceiptPicker(form, (ready) => {
+    movingReceipt = ready;
+  });
+
+  modalFor('#cbStockModal').show();
+}
+
+async function saveStock(event) {
+  event.preventDefault();
+
+  const form = event.target;
+  const button = $('#cbStockSave', container);
+  const errorBox = $('#sfErrors', container);
+  const originalText = button.textContent;
+
+  button.disabled = true;
+  button.textContent = 'Saving...';
+  if (errorBox) errorBox.innerHTML = '';
+
+  try {
+    const outcome = await submitStockForm({
+      form,
+      type: movingType,
+      materials: catalog.materials,
+      receipt: movingReceipt,
+      fixedMaterial: movingMaterial,
+    });
+
+    if (!outcome.ok) {
+      if (errorBox) {
+        errorBox.innerHTML = outcome.errors.map((error) => alertHtml('danger', error)).join('');
+      }
+      button.disabled = false;
+      button.textContent = originalText;
+      return;
+    }
+
+    modalFor('#cbStockModal').hide();
+
+    // Both the confirmation and whatever the alert service reported are
+    // shown above the catalog, which is reloaded so the new quantity and
+    // status badge are correct.
+    message = outcome.message;
+    const alertMessage = outcome.alertMessage;
+
+    await renderMaterials(container);
+
+    if (alertMessage) {
+      const head = $('.cb-page-head', container);
+      head?.insertAdjacentHTML('afterend', alertHtml(alertMessage.kind, alertMessage.text));
+    }
+  } catch (error) {
+    if (errorBox) errorBox.innerHTML = alertHtml('danger', friendlyError(error));
+    button.disabled = false;
+    button.textContent = originalText;
   }
 }

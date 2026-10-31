@@ -36,6 +36,8 @@ import { renderUsers } from './pages/users.js';
 import { renderMaterials } from './pages/materials.js';
 import { renderCategories } from './pages/categories.js';
 import { renderSuppliers } from './pages/suppliers.js';
+import { renderMovements } from './pages/movements.js';
+import { renderStockIn, renderStockOut } from './pages/stock.js';
 import { esc } from './lib/dom.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
@@ -68,13 +70,15 @@ route('/materials', async () => renderMaterials(mountShell()));
 route('/categories', async () => renderCategories(mountShell()));
 route('/suppliers', async () => renderSuppliers(mountShell()), { manager: true });
 
+// Stock movements. Both roles log them, as MovementController allowed.
+route('/movements', async () => renderMovements(mountShell()));
+route('/movements/stockin', async () => renderStockIn(mountShell()));
+route('/movements/stockout', async () => renderStockOut(mountShell()));
+
 // The remaining pages are built in the steps that follow. They are
 // registered now so the sidebar links resolve rather than falling through
 // to the not-found screen, and each says plainly that it is not ready.
 route('/dashboard', () => placeholder('Dashboard', 'step 7'), { manager: true });
-route('/movements', () => placeholder('Movement History', 'step 6'));
-route('/movements/stockin', () => placeholder('Stock In', 'step 6'));
-route('/movements/stockout', () => placeholder('Stock Out', 'step 6'));
 route('/reports', () => placeholder('Inventory Report', 'step 7'), { manager: true });
 route('/reports/lowstock', () => placeholder('Low Stock Report', 'step 7'), { manager: true });
 route('/reports/movement', () => placeholder('Movement Report', 'step 7'), { manager: true });
