@@ -112,3 +112,144 @@
     font-size: 13px;
     font-weight: 600;
 }
+
+/* ============================================================
+   3. TABLE CELL EMPHASIS
+   The first column of a table is the record's name, shown a
+   little stronger than the detail columns beside it.
+   ============================================================ */
+
+.cb-cell-strong {
+    color: var(--cb-text);
+    font-weight: 600;
+}
+
+/* ============================================================
+   4. TABS
+   Used by the Users page to separate pending, active and
+   disabled accounts, and later by the reports pages. Styled to
+   match the sidebar's active-link treatment: an orange rule
+   under the selected tab rather than a filled pill.
+   ============================================================ */
+
+.cb-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.cb-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 14px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--cb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cb-tab:hover {
+    color: var(--cb-text);
+}
+
+.cb-tab.is-active {
+    color: var(--cb-orange-dark);
+    border-bottom-color: var(--cb-orange);
+}
+
+.cb-tab-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background-color: var(--cb-divider);
+    color: var(--cb-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.cb-tab.is-active .cb-tab-count {
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+}
+
+/* ============================================================
+   5. LOGIN PAGE ADDITIONS
+   The LAN version had one password form. The cloud version adds
+   a Register tab, because employees now sign themselves up, and
+   a Google button. Everything else on the login card is
+   unchanged from the original stylesheet.
+   ============================================================ */
+
+.cb-auth-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid var(--cb-border);
+}
+
+.cb-auth-tab {
+    flex: 1;
+    padding: 10px 8px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--cb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cb-auth-tab:hover {
+    color: var(--cb-text);
+}
+
+.cb-auth-tab.is-active {
+    color: var(--cb-orange-dark);
+    border-bottom-color: var(--cb-orange);
+}
+
+/* A horizontal rule with the word "or" sitting in the middle */
+.cb-auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0;
+    color: var(--cb-faint);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.cb-auth-divider::before,
+.cb-auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background-color: var(--cb-border);
+}
+
+/* A button that reads as a link, for "Forgot your password?" */
+.cb-link-btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--cb-orange-dark);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.cb-link-btn:hover {
+    color: var(--cb-brown);
+}

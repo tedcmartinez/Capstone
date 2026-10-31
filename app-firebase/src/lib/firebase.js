@@ -5,11 +5,12 @@
 // initializeApp again.
 
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import {
   initializeFirestore,
   persistentLocalCache,
   persistentSingleTabManager,
+  connectFirestoreEmulator,
 } from 'firebase/firestore';
 
 import { firebaseConfig } from './config.js';
@@ -33,8 +34,39 @@ export const auth = getAuth(app);
 // the server instead of sharing the cache.
 // ============================================================
 
+// If IndexedDB is missing or blocked, the SDK reports it and falls back to
+// an in-memory cache rather than failing. That is worth knowing: in a
+// private window, or with site data blocked, the app keeps working but
+// loses its offline ability, because queued writes live in that cache. The
+// shop desktop uses an ordinary Chrome or Edge profile, so persistence is
+// available there.
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentSingleTabManager(),
   }),
 });
+
+// ============================================================
+// LOCAL EMULATORS
+//
+// Set VITE_USE_EMULATORS=true to point the app at the local Auth and
+// Firestore emulators instead of the live project. This is how the sign-in
+// and approval flow is tested without creating real accounts, and without
+// spending reads and writes from the free tier quota.
+//
+// The integration tests set the global instead, because they import these
+// modules directly in Node rather than through Vite.
+//
+// Nothing here runs in a production build: both conditions are false, and
+// the branch is dropped from the bundle.
+// ============================================================
+
+const useEmulators =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_EMULATORS === 'true') ||
+  globalThis.__CORNERBLOCK_USE_EMULATORS__ === true;
+
+if (useEmulators) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  console.info('Cornerblock: using local Firebase emulators, not the live project.');
+}
