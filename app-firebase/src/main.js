@@ -33,6 +33,9 @@ import {
   renderAuthError,
 } from './pages/gate.js';
 import { renderUsers } from './pages/users.js';
+import { renderMaterials } from './pages/materials.js';
+import { renderCategories } from './pages/categories.js';
+import { renderSuppliers } from './pages/suppliers.js';
 import { esc } from './lib/dom.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
@@ -58,13 +61,17 @@ route('/login', () => renderLogin());
 
 route('/users', async () => renderUsers(mountShell()), { manager: true });
 
+// The catalog. /materials and /categories are open to both roles, with cost
+// and supplier columns left out for staff. /suppliers is manager only, as
+// SupplierController was.
+route('/materials', async () => renderMaterials(mountShell()));
+route('/categories', async () => renderCategories(mountShell()));
+route('/suppliers', async () => renderSuppliers(mountShell()), { manager: true });
+
 // The remaining pages are built in the steps that follow. They are
 // registered now so the sidebar links resolve rather than falling through
 // to the not-found screen, and each says plainly that it is not ready.
 route('/dashboard', () => placeholder('Dashboard', 'step 7'), { manager: true });
-route('/materials', () => placeholder('Materials', 'step 5'));
-route('/categories', () => placeholder('Categories', 'step 5'));
-route('/suppliers', () => placeholder('Suppliers', 'step 5'), { manager: true });
 route('/movements', () => placeholder('Movement History', 'step 6'));
 route('/movements/stockin', () => placeholder('Stock In', 'step 6'));
 route('/movements/stockout', () => placeholder('Stock Out', 'step 6'));
