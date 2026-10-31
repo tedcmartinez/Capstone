@@ -47,6 +47,8 @@ import {
   renderValueReport,
 } from './pages/reports.js';
 import { renderAudit } from './pages/audit.js';
+import { renderChecklist } from './pages/checklist.js';
+import { renderSettings } from './pages/settings.js';
 import { esc } from './lib/dom.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
@@ -84,9 +86,6 @@ route('/movements', async () => renderMovements(mountShell()));
 route('/movements/stockin', async () => renderStockIn(mountShell()));
 route('/movements/stockout', async () => renderStockOut(mountShell()));
 
-// The remaining pages are built in the steps that follow. They are
-// registered now so the sidebar links resolve rather than falling through
-// to the not-found screen, and each says plainly that it is not ready.
 // The manager's overview and the four reports. All manager only, because
 // every one of them exposes cost information, which is why the PHP
 // controller gated the whole class rather than individual actions.
@@ -95,9 +94,12 @@ route('/reports', async () => renderInventoryReport(mountShell()), { manager: tr
 route('/reports/lowstock', async () => renderLowStockReport(mountShell()), { manager: true });
 route('/reports/movement', async () => renderMovementReport(mountShell()), { manager: true });
 route('/reports/value', async () => renderValueReport(mountShell()), { manager: true });
-route('/checklist', () => placeholder('Reorder Checklist', 'step 9'), { manager: true });
+
+// The audit trail, the reorder checklist and settings. Manager only, as
+// ChecklistController and SettingsController were.
 route('/audit', async () => renderAudit(mountShell()), { manager: true });
-route('/settings', () => placeholder('Settings', 'step 9'), { manager: true });
+route('/checklist', async () => renderChecklist(mountShell()), { manager: true });
+route('/settings', async () => renderSettings(mountShell()), { manager: true });
 
 setNotFound(() => {
   if (!isSignedIn()) {
@@ -190,29 +192,6 @@ function renderCurrentScreen() {
   }
 
   resolve();
-}
-
-// A clearly labelled stand-in for the pages still to be built, so clicking
-// a sidebar link during the migration shows something honest rather than a
-// blank panel or an error.
-function placeholder(title, step) {
-  const content = mountShell();
-  content.innerHTML = `
-    <div class="cb-page-head">
-      <div>
-        <h1 class="cb-page-title">${esc(title)}</h1>
-        <p class="cb-page-sub">This page is being migrated to Firebase.</p>
-      </div>
-    </div>
-    <div class="cb-card">
-      <div class="cb-card-body">
-        <p class="mb-0" style="color: var(--cb-muted); font-size: 14px;">
-          ${esc(title)} is scheduled for ${esc(step)} of the migration and is
-          not connected yet. The LAN version of this page is still available
-          for reference.
-        </p>
-      </div>
-    </div>`;
 }
 
 // ============================================================

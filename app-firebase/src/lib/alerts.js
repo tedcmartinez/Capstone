@@ -38,45 +38,25 @@ export function alertsConfigured() {
 // did not go out. Failed attempts are recorded in notification_log by the
 // script itself when it can be reached at all.
 export async function requestStockCheck(materialId) {
-  if (!alertsConfigured()) {
-    return { status: ALERTS_NOT_CONFIGURED };
-  }
+  // callScript() never throws: being offline or unreachable comes back as a
+  // status, which is what lets a saved movement stay saved
+  const result = await callScript('checkStock', { materialId });
 
-  try {
-    const idToken = await auth.currentUser.getIdToken();
-
-    const response = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      // Apps Script web apps reject a preflight request, so the content type
-      // is kept to one that does not trigger CORS preflight. The body is
-      // still JSON and the script parses it as such.
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'checkStock', idToken, materialId }),
-    });
-
-    if (!response.ok) {
-      return { status: ALERTS_UNREACHABLE, detail: `HTTP ${response.status}` };
-    }
-
-    const result = await response.json();
-
-    if (result.ok === false) {
-      return { status: ALERTS_REFUSED, detail: result.error || 'The alert service refused the request.' };
-    }
-
+  if (!result.ok) {
     return {
-      status: ALERTS_SENT,
-      // What the script decided: which alerts it sent, and which it skipped
-      // because one had already gone out within the last 24 hours.
-      sent: result.sent || [],
-      skipped: result.skipped || [],
-      recipients: result.recipients || 0,
+      status: result.status,
+      detail: result.detail || 'The alert service refused the request.',
     };
-  } catch (error) {
-    // Offline, or the script is unreachable. Either way the movement is
-    // already saved, so this is reported rather than raised.
-    return { status: ALERTS_UNREACHABLE, detail: error?.message || 'No connection.' };
   }
+
+  return {
+    status: ALERTS_SENT,
+    // What the script decided: which alerts it sent, and which it skipped
+    // because one had already gone out within the last 24 hours
+    sent: result.sent || [],
+    skipped: result.skipped || [],
+    recipients: result.recipients || 0,
+  };
 }
 
 // Turns the result into a sentence for the person who just logged the
@@ -134,21 +114,68 @@ export function describeAlertResult(result, materialName) {
 }
 
 // Used by the Settings page to show whether the alert service is answering.
-export async function pingAlertService() {
+// Posts one action to the script with the caller's ID token, which the script
+// checks with Google before doing anything. Returns the script's answer, or
+// { ok: false, status, detail } when it could not be reached at all.
+async function callScript(action, body = {}) {
   if (!alertsConfigured()) return { ok: false, status: ALERTS_NOT_CONFIGURED };
 
+  let response;
   try {
-    const response = await fetch(APPS_SCRIPT_URL, {
+    const idToken = await auth.currentUser.getIdToken();
+    response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'ping' }),
+      body: JSON.stringify({ action, idToken, ...body }),
     });
-
-    if (!response.ok) return { ok: false, status: ALERTS_UNREACHABLE, detail: `HTTP ${response.status}` };
-
-    const result = await response.json();
-    return { ok: true, status: ALERTS_SENT, sender: result.sender, quotaRemaining: result.quotaRemaining };
   } catch (error) {
     return { ok: false, status: ALERTS_UNREACHABLE, detail: error?.message || 'No connection.' };
   }
+
+  if (!response.ok) {
+    return { ok: false, status: ALERTS_UNREACHABLE, detail: `HTTP ${response.status}` };
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    return { ok: false, status: ALERTS_UNREACHABLE, detail: 'The alert service sent back something unreadable.' };
+  }
+
+  // The script answered but declined. Its message is written for the person
+  // reading it, so it is passed through rather than replaced.
+  if (result.ok === false) {
+    return { ok: false, status: ALERTS_REFUSED, detail: result.error, code: result.code };
+  }
+
+  return { ...result, ok: true, status: ALERTS_SENT };
+}
+
+// Used by the Settings page to show whether the alert service is answering.
+//
+// This used to report success whenever the script replied at all, even when
+// the reply was a refusal, so a misconfigured service would have shown as
+// working. A refusal is now reported as one, with the script's own reason.
+export async function pingAlertService() {
+  const result = await callScript('ping');
+
+  if (!result.ok) return result;
+
+  return {
+    ok: true,
+    status: ALERTS_SENT,
+    sender: result.sender,
+    quotaRemaining: result.quotaRemaining,
+  };
+}
+
+// Emails the reorder checklist. The script builds the list from Firestore
+// itself, so only the recipients are sent: the ids of the chosen accounts,
+// and at most one outside address.
+export async function sendChecklist({ recipientUids, extraEmail }) {
+  return callScript('sendChecklist', {
+    recipientUids,
+    extraEmail: extraEmail || undefined,
+  });
 }
