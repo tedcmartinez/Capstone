@@ -9,6 +9,7 @@ import { watchAuth } from './lib/auth.js';
 import {
   route,
   setGuard,
+  setReady,
   setNotFound,
   startRouter,
   navigate,
@@ -122,11 +123,12 @@ setNotFound(() => {
 // rather than bounced around the app.
 // ============================================================
 
-setGuard((path) => {
-  // Still waiting for Firebase on a cold load. The loading screen in
-  // index.html stays up and the real decision is made once auth resolves.
-  if (!authResolved) return null;
+// Nothing is drawn until Firebase has said who is signed in. Without this
+// the first paint happens with an empty session, which drew the staff
+// sidebar with a blank name before correcting itself a moment later.
+setReady(() => authResolved);
 
+setGuard((path) => {
   if (authError) return null;
   if (webmasterVerification) return null;
 
@@ -216,6 +218,12 @@ function placeholder(title, step) {
 // STARTUP
 // ============================================================
 
+// The listeners for links and the back button are attached now, but the
+// first screen is NOT drawn here. Firebase answers a moment later, and the
+// callback below draws it once the role is known. Until then the loading
+// screen in index.html stays up.
+startRouter({ resolveImmediately: false });
+
 watchAuth((user, error) => {
   authResolved = true;
   authError = error || null;
@@ -227,5 +235,3 @@ watchAuth((user, error) => {
 
   renderCurrentScreen();
 });
-
-startRouter();

@@ -12,6 +12,7 @@
 const routes = [];
 let notFoundHandler = null;
 let beforeEach = null;
+let readyCheck = null;
 
 // Registers a route. The pattern is a plain path, optionally ending in /:id
 // for the one case that needs it.
@@ -28,6 +29,22 @@ export function setNotFound(handler) {
 // screen no matter what address is typed.
 export function setGuard(handler) {
   beforeEach = handler;
+}
+
+// A readiness check, consulted before anything is drawn.
+//
+// This exists because of a real bug. The app cannot know which role is
+// signed in until Firebase has answered, and until then session.js reports
+// nobody. A page drawn in that moment gets the staff sidebar with an empty
+// name, and is then redrawn correctly a fraction of a second later, so the
+// interface appears to flicker from one role to another.
+//
+// Returning false here stops the route being resolved at all, leaving the
+// loading screen in place. It is checked on every resolve rather than only
+// at startup, so a link clicked during those first moments cannot slip
+// past it either.
+export function setReady(handler) {
+  readyCheck = handler;
 }
 
 // ============================================================
@@ -101,6 +118,9 @@ export function routeMeta(path) {
 }
 
 export async function resolve() {
+  // Nothing is drawn until the app knows who is signed in. See setReady().
+  if (readyCheck && !readyCheck()) return;
+
   const path = currentPath();
 
   if (beforeEach) {
@@ -125,7 +145,10 @@ export async function resolve() {
 // STARTUP
 // ============================================================
 
-export function startRouter() {
+// resolveImmediately is false when the caller wants the listeners attached
+// but the first screen drawn by something else, which is how the app waits
+// for Firebase before painting anything.
+export function startRouter({ resolveImmediately = true } = {}) {
   // The back and forward buttons
   window.addEventListener('popstate', () => resolve());
 
@@ -144,5 +167,5 @@ export function startRouter() {
     navigate(href);
   });
 
-  return resolve();
+  return resolveImmediately ? resolve() : undefined;
 }

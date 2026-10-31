@@ -19,6 +19,15 @@
     },
 
     {
+      "collectionGroup": "suppliers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isArchived", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+
+    {
       "collectionGroup": "stock_movements",
       "queryScope": "COLLECTION",
       "fields": [

@@ -20,6 +20,7 @@ import {
   shortDate,
   todayIso,
   esc,
+  friendlyError,
 } from '../../app-firebase/src/lib/dom.js';
 import {
   filterMaterials,
@@ -419,5 +420,76 @@ describe('display helpers', () => {
       '&lt;script&gt;alert(1)&lt;/script&gt;'
     );
     expect(esc(`Mahogany "A" & 'B'`)).toBe('Mahogany &quot;A&quot; &amp; &#039;B&#039;');
+  });
+});
+
+// ============================================================
+// ERROR MESSAGES
+//
+// What the shop floor is shown when something fails. The rule is that no
+// message may carry a URL or a stack trace: those belong in the browser
+// console, which friendlyError() also writes to.
+// ============================================================
+
+describe('friendlyError', () => {
+  function firebaseError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  it('explains a missing index without the console link', () => {
+    // The real message Firestore produces, which ends in a link several
+    // hundred characters long and used to stretch the alert off the page
+    const error = firebaseError(
+      'failed-precondition',
+      'The query requires an index. You can create it here: ' +
+        'https://console.firebase.google.com/v1/r/project/cornerblock-inventory/firestore/indexes?create_composite=ClFwcm9qZWN0cy9jb3JuZXJibG9jay1pbnZlbnRvcnkvZGF0YWJhc2VzLyhkZWZhdWx0KS9jb2xsZWN0aW9uR3JvdXBzL3N1cHBsaWVycy9pbmRleGVzL18QARoOCgppc0FyY2hpdmVkEAEaCAoEbmFtZRABGgwKCF9fbmFtZV9fEAE'
+    );
+
+    const message = friendlyError(error);
+
+    expect(message).not.toContain('http');
+    expect(message).not.toContain('console.firebase');
+    expect(message).toContain('still being built');
+    expect(message).toContain('Try again shortly');
+  });
+
+  it('strips a url out of any other message', () => {
+    const message = friendlyError(new Error('Something failed, see https://example.com/a/very/long/path'));
+
+    expect(message).not.toContain('http');
+    expect(message).toContain('Something failed');
+  });
+
+  it('removes the FirebaseError prefix the sdk adds', () => {
+    expect(friendlyError(new Error('FirebaseError: the thing broke'))).not.toContain('FirebaseError');
+  });
+
+  it('uses its own wording for the codes it knows', () => {
+    expect(friendlyError(firebaseError('permission-denied', 'raw text'))).toBe(
+      'You do not have permission to do that.'
+    );
+    expect(friendlyError(firebaseError('unavailable', 'raw text'))).toContain('No connection');
+  });
+
+  it('explains running out of the free daily allowance', () => {
+    // Worth its own wording: on this plan it is a real possibility and the
+    // shop needs to know it is not a fault they can fix
+    expect(friendlyError(firebaseError('resource-exhausted', 'quota'))).toContain(
+      'daily free allowance'
+    );
+  });
+
+  it('falls back to something sayable when there is no message at all', () => {
+    expect(friendlyError(new Error(''))).toBe('Something went wrong. Please try again.');
+    expect(friendlyError({})).toBe('Something went wrong. Please try again.');
+  });
+
+  it('does not leave a dangling word where the url was', () => {
+    const message = friendlyError(new Error('It broke, see https://example.com/x'));
+
+    expect(message).not.toMatch(/,\s*(see|at|here)?\s*\.?$/);
+    expect(message.endsWith('.')).toBe(true);
   });
 });

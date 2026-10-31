@@ -167,6 +167,12 @@ export function alertHtml(kind, message) {
 // Turns a Firebase error into something a shop floor user can act on.
 // Firebase codes like 'auth/invalid-credential' are meaningless to them.
 export function friendlyError(error) {
+  // The whole error, with whatever URL or stack it carries, goes to the
+  // console. Nothing is lost by showing the user a shorter sentence: this
+  // is where the person maintaining the system looks, and a missing index
+  // error in particular carries the link that creates it.
+  if (error) console.error('Cornerblock:', error);
+
   const code = error?.code || '';
   const messages = {
     'auth/invalid-credential': 'Invalid email or password.',
@@ -185,7 +191,44 @@ export function friendlyError(error) {
       'That email is already registered with a different sign-in method. Use the other method instead.',
     'permission-denied': 'You do not have permission to do that.',
     unavailable: 'No connection to the server. The change will be saved when the connection returns.',
+    'deadline-exceeded': 'The server took too long to answer. Check the connection and try again.',
+    'resource-exhausted':
+      'The system has reached its daily free allowance of database activity. ' +
+      'It will start working again tomorrow.',
   };
   if (messages[code]) return messages[code];
-  return error?.message || 'Something went wrong. Please try again.';
+
+  // A missing database index. Firestore's own message is a paragraph ending
+  // in a very long console URL, which is useful to whoever maintains the
+  // system and meaningless to the shop. The full error goes to the browser
+  // console below; this is what the user is told.
+  if (code === 'failed-precondition' && /index/i.test(String(error?.message))) {
+    return (
+      'This page needs a database index that is still being built. ' +
+      'That usually takes a few minutes after an update. Try again shortly, ' +
+      'and tell the system administrator if it keeps happening.'
+    );
+  }
+
+  return cleanMessage(error?.message) || 'Something went wrong. Please try again.';
+}
+
+// Strips anything that belongs in a developer's console rather than on a
+// shop floor screen: URLs, and the "FirebaseError:" prefix the SDK adds.
+//
+// A long unbroken URL also used to stretch the alert strip past the edge of
+// the page, so removing it fixes the layout as well as the wording. The
+// alert itself now wraps regardless, in app.css.
+function cleanMessage(message) {
+  if (!message) return '';
+
+  const withoutUrls = String(message)
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/^FirebaseError:\s*/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    // A message that ended at the URL is left with a dangling connective
+    .replace(/[\s,:;]+(here|at|see)?[\s.]*$/i, '');
+
+  return withoutUrls ? `${withoutUrls}.`.replace(/\.+$/, '.') : '';
 }

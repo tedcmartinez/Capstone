@@ -340,3 +340,31 @@
     background-color: var(--cb-orange-soft);
     color: var(--cb-orange-dark);
 }
+
+/* ============================================================
+   9. ALERT WRAPPING
+   The alert strip in style.css is a flex row, which lets a long
+   unbroken string, such as a URL inside an error message, push
+   the layout past the edge of the page. These rules keep any
+   message inside the box however it is worded.
+
+   friendlyError() in lib/dom.js also strips URLs out of error
+   text, so the two work together: the message is shortened,
+   and whatever remains wraps.
+   ============================================================ */
+
+.cb-alert {
+    /* A flex item will not shrink below its content without this */
+    min-width: 0;
+    align-items: flex-start;
+}
+
+.cb-alert > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.cb-alert svg {
+    flex: 0 0 auto;
+}

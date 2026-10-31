@@ -204,6 +204,36 @@ describe('what each role can load', () => {
     expect(materialsLib.inventoryValue(staffView.materials)).toBe(0);
   });
 
+  // This query is the one that was missing an index in production. The
+  // emulator does not enforce indexes, so this cannot catch that by itself,
+  // but it does pin the shape of the query, so the index that shape needs
+  // stays the one declared in firestore.indexes.json.
+  it('lists suppliers by name, leaving archived ones out', async () => {
+    await seed('suppliers/s2', {
+      name: { stringValue: 'Zenith Metals' },
+      viberContact: { stringValue: '' },
+      notes: { stringValue: '' },
+      isArchived: { booleanValue: false },
+      lastAuditId: { stringValue: 'seed' },
+    });
+    await seed('suppliers/s3', {
+      name: { stringValue: 'Archived Supplier' },
+      viberContact: { stringValue: '' },
+      notes: { stringValue: '' },
+      isArchived: { booleanValue: true },
+      lastAuditId: { stringValue: 'seed' },
+    });
+
+    await signInAs('gm@example.com', 'general_manager');
+    const catalog = await materialsLib.loadCatalog();
+
+    // Ordered by name, and the archived one is absent
+    expect(catalog.suppliers.map((s) => s.name)).toEqual([
+      'Antipolo Hardwood Supply',
+      'Zenith Metals',
+    ]);
+  });
+
   it('leaves archived materials out of the catalog', async () => {
     await seed('materials/m2', {
       name: { stringValue: 'Retired Material' },
