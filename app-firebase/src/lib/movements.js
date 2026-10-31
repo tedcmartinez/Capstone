@@ -13,6 +13,7 @@ import {
   limit,
   startAfter,
   serverTimestamp,
+  increment,
 } from 'firebase/firestore';
 
 import { db } from './firebase.js';
@@ -32,7 +33,19 @@ import { PAGE_SIZE } from './config.js';
 
 export function allowedReasons(type) {
   if (type === 'in') return ['Purchase', 'Restock', 'Return', 'Correction'];
-  return ['Project Usage', 'Damaged', 'Transfer', 'Other'];
+  if (type === 'out') return ['Project Usage', 'Damaged', 'Transfer', 'Other'];
+
+  // Adjustments. A reason is required rather than optional, because an
+  // adjustment overrides a figure the recorded movements do not account
+  // for, and six months later somebody will want to know why.
+  return ['Physical Count', 'Damage Found', 'Loss or Theft', 'Data Correction'];
+}
+
+// The three kinds of movement, as the history and the reports label them
+export const MOVEMENT_TYPES = ['in', 'out', 'adjust'];
+
+export function movementTypeLabel(type) {
+  return { in: 'IN', out: 'OUT', adjust: 'ADJUST' }[type] || type;
 }
 
 // The dropdown showed "Stock Correction" while storing "Correction"
@@ -47,43 +60,27 @@ export function reasonLabel(reason) {
 // ============================================================
 // LOGGING A MOVEMENT
 //
-// A deliberate difference from the brief, and the one trade-off in this
-// migration worth stating plainly.
+// Stock-in and stock-out are recorded as a RELATIVE change. The material's
+// quantity is updated with increment(), not by writing a figure the browser
+// worked out, and firestore.rules checks the size of that change against
+// the live value at the moment it lands.
 //
-// The brief asked for a transaction: read the material, check the result is
-// not negative, write the movement and the new quantity together. A
-// Firestore transaction does exactly that, but it requires a live
-// connection and will not queue offline, which would mean the shop cannot
-// log a withdrawal whenever the office internet drops. That is acceptance
-// test 17, and it is the more important of the two.
+// This is what makes offline entry work properly. An entry typed while the
+// office connection is down is a statement about what physically happened:
+// twenty planks were taken. It stays true no matter what the total was when
+// it was written, or what else has been recorded since. Two withdrawals of
+// five, both typed against a total of eighteen, correctly leave eight.
 //
-// So this uses a batch, which does queue offline, and the checking that a
-// transaction would have done is moved into firestore.rules instead:
+// beforeQty and afterQty are still written, but only as a record of what
+// the person was looking at when they entered it. The interface labels them
+// that way, because on a late-syncing entry they are the device's view of
+// the moment, not the arithmetic the server performed.
 //
-//   1. beforeQty must equal the quantity the server actually holds at the
-//      moment the batch is applied. This is the important one. It means a
-//      movement calculated from an out-of-date copy of the material is
-//      refused rather than written, so a stale figure cannot produce a
-//      wrong total. Two people working from the same starting number
-//      cannot both succeed: the first moves the server's value and the
-//      second no longer matches it.
-//   2. The arithmetic must hold: afterQty must be beforeQty plus the
-//      quantity for a stock-in, or minus it for a stock-out, and the
-//      material must be left holding exactly afterQty.
-//   3. afterQty may not be negative, which is what stops a withdrawal
-//      larger than the stock on hand.
-//   4. A material's quantity may not change at all except through a
-//      movement created in the same batch, so no figure can be rewritten
-//      without a record of who moved what.
+// The one rejection left is a stock-out that would take the total below
+// zero, which the rules refuse. If that happens to an entry already
+// reported as saved, it appears in the failed-sync bar: see lib/sync.js.
 //
-// The alert email is sent by the Apps Script, which reads the real quantity
-// from Firestore rather than believing anything sent from here.
-//
-// What this still gives up compared with a transaction: a refused write is
-// discovered after the fact rather than retried automatically. An entry
-// typed offline against a figure that has since moved will be rejected when
-// it finally reaches the server, and has to be entered again. The user is
-// told, by name, which entry failed and why: see lib/sync.js.
+// Adjustments are different and are handled by adjustStock() below.
 // ============================================================
 
 export async function logMovement({ type, material, quantity, reason, reference, notes, receipt }) {
@@ -94,7 +91,9 @@ export async function logMovement({ type, material, quantity, reason, reference,
   const afterQty = type === 'in' ? beforeQty + amount : beforeQty - amount;
 
   // Checked here so the user gets a sentence rather than a permission error.
-  // The rules check it again, and theirs is the one that counts.
+  // This is the figure on their screen, which may be behind the server, so
+  // it is a courtesy rather than the safeguard: the rules check the real
+  // value when the write lands, and theirs is the one that counts.
   if (afterQty < 0) {
     throw new Error(
       `Cannot remove more than the ${beforeQty} ${material.unit} currently in stock.`
@@ -138,21 +137,23 @@ export async function logMovement({ type, material, quantity, reason, reference,
 
   ops.push({ type: 'set', collection: 'stock_movements', id: movementId, data: movement });
 
-  // The running total on the material. This is the only field a movement
-  // may change on a material, and a movement is the only thing that may
-  // change it at all.
+  // The running total, applied as a change rather than as a figure.
   //
-  // lastMovementId names the movement that justifies the new figure. The
-  // rules read it to check that a matching movement is being created in this
-  // same batch, that it started from the quantity the server currently
-  // holds, and that its arithmetic is right. Without it a quantity could be
-  // rewritten with no movement filed to explain it.
+  // increment() is resolved by the server against whatever the value is when
+  // the write lands, so this is correct even if the entry was made against a
+  // total that has since moved. The rules see the resolved result and check
+  // that it moved by exactly this movement's quantity and did not go below
+  // zero.
+  //
+  // lastMovementId names the movement that justifies the change, which is
+  // what stops a quantity being rewritten with no movement filed to explain
+  // it.
   ops.push({
     type: 'update',
     collection: 'materials',
     id: material.id,
     data: {
-      stockQuantity: afterQty,
+      stockQuantity: increment(type === 'in' ? amount : -amount),
       updatedAt: serverTimestamp(),
       updatedBy: user.uid,
       lastMovementId: movementId,
@@ -201,6 +202,109 @@ function movementSummary({ type, amount, material, reason, reference }) {
     `${direction} ${amount} ${material.unit}, ${material.name}` +
     (detail ? ` (${detail})` : '')
   );
+}
+
+// ============================================================
+// ADJUSTING A COUNT
+//
+// The manager has counted the shelf and the total is now whatever they
+// counted, regardless of what the recorded movements add up to. This is how
+// a real discrepancy gets corrected: breakage nobody logged, an offcut used
+// without a slip, a miscount on delivery.
+//
+// It is treated as the opposite of a stock-in or stock-out in two ways.
+//
+// It is ABSOLUTE, so the figure the manager was looking at has to still be
+// the figure on the server. If something moved while they were counting,
+// their count is already out of date and writing it would silently discard
+// that movement. The rules refuse it and the manager counts again.
+//
+// And it needs a connection, for the same reason. An adjustment typed
+// offline and synced an hour later would be a count of a shelf as it was an
+// hour ago. The rules refuse those too, and the failed-sync bar says so.
+//
+// Manager and webmaster only, enforced in the rules, not merely by hiding
+// the button.
+// ============================================================
+
+export async function adjustStock({ material, countedQuantity, reason, notes }) {
+  const user = currentUser();
+
+  const beforeQty = Number(material.stockQuantity) || 0;
+  const afterQty = Number(countedQuantity);
+  const difference = afterQty - beforeQty;
+
+  if (!Number.isInteger(afterQty) || afterQty < 0) {
+    throw new Error('The counted quantity must be a whole number, zero or more.');
+  }
+  if (difference === 0) {
+    throw new Error(
+      `The counted quantity is already ${beforeQty} ${material.unit}, so there is nothing to adjust.`
+    );
+  }
+  if (!reason) {
+    throw new Error('Please give a reason for the adjustment.');
+  }
+
+  const movementId = newDocId('stock_movements');
+
+  const movement = {
+    materialId: material.id,
+    materialName: material.name,
+    type: 'adjust',
+    // The size of the change, so totals and the history read the same way
+    // as for any other movement
+    quantity: Math.abs(difference),
+    difference,
+    beforeQty,
+    afterQty,
+    movementDate: todayIso(),
+    reason,
+    reference: '',
+    notes: notes || '',
+    receiptId: null,
+    loggedBy: user.uid,
+    loggedByName: user.name,
+    createdAt: serverTimestamp(),
+  };
+
+  const ops = [
+    { type: 'set', collection: 'stock_movements', id: movementId, data: movement },
+    {
+      type: 'update',
+      collection: 'materials',
+      id: material.id,
+      data: {
+        // Written as the counted figure, not as a change. An adjustment is
+        // the manager overriding the total, so an increment would be the
+        // wrong shape entirely.
+        stockQuantity: afterQty,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+        lastMovementId: movementId,
+      },
+    },
+  ];
+
+  const direction = difference > 0 ? 'up' : 'down';
+  const summary =
+    `Adjusted ${material.name} ${direction} from ${beforeQty} to ${afterQty} ` +
+    `${material.unit} (${reasonLabel(reason)})`;
+
+  const { status } = await auditedWrite(
+    ops,
+    {
+      action: 'stock.adjust',
+      entity: 'stock_movements',
+      entityId: movementId,
+      before: { stockQuantity: beforeQty },
+      after: { stockQuantity: afterQty },
+      summary,
+    },
+    { track: summary }
+  );
+
+  return { movementId, beforeQty, afterQty, difference, status };
 }
 
 // ============================================================
@@ -280,17 +384,38 @@ export async function loadMovementsInRange(dateFrom, dateTo) {
 
 // Totals in and out across a list of movements, for the strip of figures
 // above the history table.
+// An adjustment is counted by the direction it moved the total, so the net
+// figure still describes what happened to the stock. Its own tally is kept
+// separate, because an adjustment is not a delivery or a withdrawal and
+// adding it to either would misrepresent both.
 export function movementTotals(movements) {
   let totalIn = 0;
   let totalOut = 0;
+  let adjustedUp = 0;
+  let adjustedDown = 0;
 
   for (const movement of movements) {
     const amount = Number(movement.quantity) || 0;
-    if (movement.type === 'in') totalIn += amount;
-    else totalOut += amount;
+
+    if (movement.type === 'in') {
+      totalIn += amount;
+    } else if (movement.type === 'out') {
+      totalOut += amount;
+    } else if (movement.type === 'adjust') {
+      const difference = Number(movement.difference) || 0;
+      if (difference > 0) adjustedUp += difference;
+      else adjustedDown += -difference;
+    }
   }
 
-  return { totalIn, totalOut, net: totalIn - totalOut };
+  return {
+    totalIn,
+    totalOut,
+    adjustedUp,
+    adjustedDown,
+    adjustmentCount: movements.filter((m) => m.type === 'adjust').length,
+    net: totalIn - totalOut + adjustedUp - adjustedDown,
+  };
 }
 
 // Quantity moved in and out per day over the last N days, including days
@@ -305,8 +430,12 @@ export function dailyTotals(movements, days) {
 
     const entry = byDate.get(key);
     const amount = Number(movement.quantity) || 0;
+
+    // Only real deliveries and withdrawals are charted. An adjustment is a
+    // correction to the record rather than material moving through the
+    // shop, and plotting it as a withdrawal would invent activity.
     if (movement.type === 'in') entry.in += amount;
-    else entry.out += amount;
+    else if (movement.type === 'out') entry.out += amount;
   }
 
   // Walking backwards from today, filling in zeros for quiet days

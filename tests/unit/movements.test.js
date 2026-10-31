@@ -14,6 +14,7 @@ import {
   daysAgoIso,
   sortMovementsInPage,
   validateMovement,
+  movementTypeLabel,
 } from '../../app-firebase/src/lib/movements.js';
 
 const material = { id: 'm1', name: 'Mahogany Plank', unit: 'pcs', stockQuantity: 18 };
@@ -36,6 +37,24 @@ describe('allowedReasons', () => {
   it('shows Correction as "Stock Correction", as the old dropdown did', () => {
     expect(reasonLabel('Correction')).toBe('Stock Correction');
     expect(reasonLabel('Purchase')).toBe('Purchase');
+  });
+
+  it('offers its own reasons for an adjustment, none of them optional', () => {
+    const reasons = allowedReasons('adjust');
+
+    expect(reasons).toContain('Physical Count');
+    expect(reasons).toContain('Damage Found');
+    // Not mixed up with the stock-in or stock-out lists
+    expect(reasons).not.toContain('Purchase');
+    expect(reasons).not.toContain('Project Usage');
+  });
+});
+
+describe('movementTypeLabel', () => {
+  it('labels all three kinds of movement', () => {
+    expect(movementTypeLabel('in')).toBe('IN');
+    expect(movementTypeLabel('out')).toBe('OUT');
+    expect(movementTypeLabel('adjust')).toBe('ADJUST');
   });
 });
 
@@ -125,7 +144,44 @@ describe('movementTotals', () => {
   });
 
   it('returns zeros for an empty list', () => {
-    expect(movementTotals([])).toEqual({ totalIn: 0, totalOut: 0, net: 0 });
+    expect(movementTotals([])).toEqual({
+      totalIn: 0,
+      totalOut: 0,
+      adjustedUp: 0,
+      adjustedDown: 0,
+      adjustmentCount: 0,
+      net: 0,
+    });
+  });
+
+  // ---- Adjustments ----
+
+  it('counts an adjustment by the direction it moved the total', () => {
+    const totals = movementTotals([
+      { type: 'in', quantity: 50 },
+      { type: 'out', quantity: 20 },
+      { type: 'adjust', quantity: 3, difference: -3 },
+      { type: 'adjust', quantity: 7, difference: 7 },
+    ]);
+
+    // Kept apart from deliveries and withdrawals, because an adjustment is
+    // neither and adding it to either would misrepresent both
+    expect(totals.totalIn).toBe(50);
+    expect(totals.totalOut).toBe(20);
+    expect(totals.adjustedUp).toBe(7);
+    expect(totals.adjustedDown).toBe(3);
+    expect(totals.adjustmentCount).toBe(2);
+
+    // The net still describes what happened to the stock overall
+    expect(totals.net).toBe(50 - 20 + 7 - 3);
+  });
+
+  it('reports no adjustments when there are none', () => {
+    const totals = movementTotals([{ type: 'in', quantity: 5 }]);
+
+    expect(totals.adjustmentCount).toBe(0);
+    expect(totals.adjustedUp).toBe(0);
+    expect(totals.adjustedDown).toBe(0);
   });
 });
 
@@ -180,6 +236,17 @@ describe('dailyTotals', () => {
     const series = dailyTotals([{ movementDate: isoDaysAgo(60), type: 'in', quantity: 99 }], 30);
 
     expect(series.every((day) => day.in === 0)).toBe(true);
+  });
+
+  it('leaves adjustments off the chart entirely', () => {
+    // An adjustment corrects the record rather than moving material through
+    // the shop, so charting it would invent activity that never happened.
+    const series = dailyTotals(
+      [{ movementDate: isoDaysAgo(0), type: 'adjust', quantity: 3, difference: -3 }],
+      7
+    );
+
+    expect(series.every((day) => day.in === 0 && day.out === 0)).toBe(true);
   });
 
   it('asks for a start date matching the window it will fill', () => {

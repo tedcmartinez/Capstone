@@ -147,58 +147,108 @@ service cloud.firestore {
     // quantity, and these functions are what make that true on the server
     // rather than only in the browser.
     //
-    // The browser works out the new total from the copy of the material it
-    // holds, which may be out of date: somebody else may have moved the same
-    // material since, or the entry may have been typed while offline. So
-    // none of those figures is taken on trust. A movement is accepted only
-    // if the quantity it claims to have started from is the quantity the
-    // server actually holds at that moment, which is what get() returns
-    // during a batch, before any of the batch is applied.
+    // There are two kinds of movement and they are checked differently,
+    // because they mean different things.
     //
-    // That one comparison is what makes a stale write impossible. Two people
-    // working from the same starting figure cannot both succeed: the first
-    // moves the server's value, and the second no longer matches it.
+    // A stock-in or stock-out is a RELATIVE change: fifty planks arrived,
+    // twenty were taken. It does not matter what the total was when the
+    // slip was written, only that the total moves by that amount. So the
+    // material is updated with an increment, and the rule checks the delta
+    // actually applied against the live value at the moment the batch
+    // lands. Two withdrawals typed on different devices, or one typed
+    // while the connection was down, both apply and both are correct.
+    //
+    // An adjustment is an ABSOLUTE change: the manager has counted the
+    // shelf and the total is now forty, whatever the system thought. That
+    // only makes sense against the figure the manager was looking at, so
+    // an adjustment is checked strictly: the quantity it says it started
+    // from must be the quantity the server holds. If anything moved in
+    // between, the count is out of date and the adjustment is refused.
     // ========================================================
 
-    // The movement's own arithmetic: in adds, out subtracts
-    function movementMathHolds(movement) {
-      return (movement.type == 'in'
-              && movement.afterQty == movement.beforeQty + movement.quantity)
-          || (movement.type == 'out'
-              && movement.afterQty == movement.beforeQty - movement.quantity);
+    // What the device recorded must be self-consistent. These figures are
+    // kept as a record of what the person saw, not as the basis for the
+    // change, so this is a sanity check rather than the real safeguard.
+    function movementMathHolds(m) {
+      return (m.type == 'in' && m.afterQty == m.beforeQty + m.quantity)
+          || (m.type == 'out' && m.afterQty == m.beforeQty - m.quantity)
+          || (m.type == 'adjust' && m.afterQty == m.beforeQty + m.difference);
     }
 
-    // Checked from the movement's side: the quantity it started from must be
-    // the one on the server now, and the material must be left holding
-    // exactly afterQty once this batch commits.
-    function movementAgreesWithMaterial() {
-      let path = materialPath(request.resource.data.materialId);
+    // A stock-in or stock-out: the change actually applied to the material
+    // must equal the movement's quantity, measured against the live server
+    // value, and must not take the total below zero.
+    //
+    // Nothing here refers to beforeQty, which is the whole point. An entry
+    // calculated from a stale total still applies correctly, because what
+    // is checked is the size of the change rather than the figure it
+    // started from. A stock-out that would go below zero is the one case
+    // still refused.
+    function deltaMatchesMovement(materialId) {
+      let path = materialPath(materialId);
+      let movement = request.resource.data;
 
       return exists(path)
-          && get(path).data.stockQuantity == request.resource.data.beforeQty
           && existsAfter(path)
-          && getAfter(path).data.stockQuantity == request.resource.data.afterQty;
+          && getAfter(path).data.stockQuantity >= 0
+          && (
+            (movement.type == 'in'
+             && getAfter(path).data.stockQuantity
+                  == get(path).data.stockQuantity + movement.quantity)
+            ||
+            (movement.type == 'out'
+             && getAfter(path).data.stockQuantity
+                  == get(path).data.stockQuantity - movement.quantity)
+          );
+    }
+
+    // An adjustment: absolute, so the count must have been taken against
+    // the figure the server still holds.
+    function adjustAgreesWithMaterial(materialId) {
+      let path = materialPath(materialId);
+      let movement = request.resource.data;
+
+      return exists(path)
+          && existsAfter(path)
+          && get(path).data.stockQuantity == movement.beforeQty
+          && getAfter(path).data.stockQuantity == movement.afterQty
+          && getAfter(path).data.stockQuantity >= 0;
     }
 
     // Checked from the material's side.
     //
-    // This half closes a gap the first cannot. Without it a quantity could
-    // be rewritten by updating the material alone and never filing a
-    // movement, because nothing would have required a movement document to
-    // exist. Making the material update name the movement that justifies it
-    // means every change to a stock figure has a record of who moved what.
+    // This half closes a gap the movement rules cannot. Without it a
+    // quantity could be rewritten by updating the material alone and never
+    // filing a movement, because nothing would have required a movement
+    // document to exist. Making the material update name the movement that
+    // justifies it means every change to a stock figure has a record of
+    // who moved what, and why.
     function backedByNewMovement(materialId) {
-      let id = request.resource.data.lastMovementId;
-      let path = movementPath(id);
+      let movementId = request.resource.data.lastMovementId;
+      let path = movementPath(movementId);
+      let movement = getAfter(path).data;
 
-      return id is string
-          && id.size() > 0
+      return movementId is string
+          && movementId.size() > 0
           && !exists(path)
           && existsAfter(path)
-          && getAfter(path).data.materialId == materialId
-          && getAfter(path).data.beforeQty == resource.data.stockQuantity
-          && getAfter(path).data.afterQty == request.resource.data.stockQuantity
-          && movementMathHolds(getAfter(path).data);
+          && movement.materialId == materialId
+          && (
+            // Relative, so compared against the live value
+            (movement.type == 'in'
+             && request.resource.data.stockQuantity
+                  == resource.data.stockQuantity + movement.quantity)
+            ||
+            (movement.type == 'out'
+             && request.resource.data.stockQuantity
+                  == resource.data.stockQuantity - movement.quantity)
+            ||
+            // Absolute, and only a manager may set one
+            (movement.type == 'adjust'
+             && isGM()
+             && movement.beforeQty == resource.data.stockQuantity
+             && request.resource.data.stockQuantity == movement.afterQty)
+          );
     }
 
     // ========================================================
@@ -363,21 +413,48 @@ service cloud.firestore {
       // may never be negative. That is what stops a stock-out larger than
       // the quantity on hand, since the browser calculates afterQty and
       // this rule refuses the result if it went below zero.
-      allow create: if isStaff()
-        && audited()
+      // Two kinds of movement, with different rules and different roles.
+      //
+      // A stock-in or stock-out may be filed by anybody approved to use the
+      // system, since that is the day-to-day job of the shop floor, and is
+      // checked as a relative change so an entry made offline still
+      // applies when it syncs.
+      //
+      // An adjustment overrides the total with a counted figure, so it is
+      // a management decision: only a manager may file one, a reason is
+      // required, and it is checked strictly against the current value.
+      allow create: if audited()
         && request.resource.data.keys().hasAll([
              'materialId', 'type', 'quantity', 'beforeQty', 'afterQty',
              'movementDate', 'loggedBy'
            ])
         && request.resource.data.loggedBy == request.auth.uid
-        && request.resource.data.type in ['in', 'out']
         && request.resource.data.quantity is int
         && request.resource.data.quantity > 0
         && request.resource.data.beforeQty is int
         && request.resource.data.afterQty is int
         && request.resource.data.afterQty >= 0
         && movementMathHolds(request.resource.data)
-        && movementAgreesWithMaterial();
+        && (
+          (isStaff()
+           && request.resource.data.type in ['in', 'out']
+           && deltaMatchesMovement(request.resource.data.materialId))
+          ||
+          (isGM()
+           && request.resource.data.type == 'adjust'
+           && 'difference' in request.resource.data
+           && request.resource.data.difference is int
+           && request.resource.data.difference != 0
+           // quantity carries the size of the change, so the totals and
+           // the history read the same way as for any other movement
+           && ((request.resource.data.difference > 0
+                && request.resource.data.quantity == request.resource.data.difference)
+               || (request.resource.data.difference < 0
+                   && request.resource.data.quantity == -request.resource.data.difference))
+           && request.resource.data.reason is string
+           && request.resource.data.reason.size() > 0
+           && adjustAgreesWithMaterial(request.resource.data.materialId))
+        );
 
       allow update, delete: if false;
     }

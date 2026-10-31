@@ -327,3 +327,16 @@
 @media print {
     .cb-sync-banner { display: none; }
 }
+
+/* ============================================================
+   8. ADJUSTMENT BADGE
+   A third movement kind, alongside the existing IN and OUT
+   badges in style.css. Brown rather than green or red, because
+   an adjustment is neither a delivery nor a withdrawal: it is a
+   correction to the record.
+   ============================================================ */
+
+.cb-move.is-adjust {
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+}

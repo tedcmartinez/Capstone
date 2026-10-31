@@ -24,6 +24,7 @@ import {
   movementTotals,
   sortMovementsInPage,
   reasonLabel,
+  movementTypeLabel,
 } from '../lib/movements.js';
 import { loadMaterials, lowStockOf } from '../lib/materials.js';
 import { loadReceipt, formatSize } from '../lib/receipts.js';
@@ -54,7 +55,7 @@ export async function renderMovements(target) {
 
   const params = allQueryParams();
   filters = {
-    type: params.type === 'in' || params.type === 'out' ? params.type : '',
+    type: ['in', 'out', 'adjust'].includes(params.type) ? params.type : '',
     materialId: params.material || '',
     dateFrom: params.from || '',
     dateTo: params.to || '',
@@ -179,6 +180,25 @@ function totalsStrip(totals) {
           <div class="cb-kpi-foot">units stocked out</div>
         </div>
       </div>
+      ${
+        totals.adjustmentCount > 0
+          ? `
+      <div class="col-6 col-lg-4">
+        <div class="cb-kpi">
+          <div class="cb-kpi-top">
+            <span class="cb-kpi-label">Adjustments</span>
+            <span class="cb-kpi-icon">
+              <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4.5a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3V5a.5.5 0 0 1 .5-.5"/></svg>
+            </span>
+          </div>
+          <div class="cb-kpi-value">${totals.adjustedUp - totals.adjustedDown >= 0 ? '+' : ''}${(totals.adjustedUp - totals.adjustedDown).toLocaleString('en-PH')}</div>
+          <div class="cb-kpi-foot">
+            across ${totals.adjustmentCount} correction${totals.adjustmentCount === 1 ? '' : 's'}
+          </div>
+        </div>
+      </div>`
+          : ''
+      }
       <div class="col-12 col-lg-4">
         <div class="cb-kpi">
           <div class="cb-kpi-top">
@@ -201,6 +221,7 @@ function filterBar(hasFilters) {
         <option value="">All Movements</option>
         <option value="in"${filters.type === 'in' ? ' selected' : ''}>Stock In only</option>
         <option value="out"${filters.type === 'out' ? ' selected' : ''}>Stock Out only</option>
+        <option value="adjust"${filters.type === 'adjust' ? ' selected' : ''}>Adjustments only</option>
       </select>
 
       <select name="material" class="cb-select">
@@ -280,7 +301,14 @@ function table(rows) {
 
 function row(movement) {
   const isIn = movement.type === 'in';
+  const isAdjust = movement.type === 'adjust';
   const quantity = Number(movement.quantity) || 0;
+  const difference = Number(movement.difference) || 0;
+
+  // The sign on the badge. An adjustment can go either way, so it follows
+  // the difference rather than the type.
+  const sign = isAdjust ? (difference > 0 ? '+' : '-') : isIn ? '+' : '-';
+  const badgeClass = isAdjust ? 'is-adjust' : isIn ? 'is-in' : 'is-out';
 
   // Reason, reference and notes are three separate fields now. The LAN
   // version joined them into the notes column with pipes, so the migration
@@ -295,9 +323,9 @@ function row(movement) {
     <tr>
       <td class="cb-cell-name">${esc(movement.materialName)}</td>
       <td>
-        <span class="cb-move ${isIn ? 'is-in' : 'is-out'}">
-          ${isIn ? 'IN' : 'OUT'}
-          <span class="cb-move-qty">${isIn ? '+' : '-'}${quantity}</span>
+        <span class="cb-move ${badgeClass}">
+          ${esc(movementTypeLabel(movement.type))}
+          <span class="cb-move-qty">${sign}${quantity}</span>
         </span>
       </td>
       <td class="cb-num">${quantity}</td>
@@ -307,11 +335,7 @@ function row(movement) {
       <td>${esc(movement.loggedByName || '')}</td>
       <td class="text-muted" style="max-width:260px;">
         ${details.length > 0 ? esc(details.join(' · ')) : '-'}
-        ${
-          movement.beforeQty !== undefined && movement.afterQty !== undefined
-            ? `<div class="cb-cell-sub">${Number(movement.beforeQty)} to ${Number(movement.afterQty)}</div>`
-            : ''
-        }
+        ${beforeAfterNote(movement)}
       </td>
       <td>
         ${
@@ -323,6 +347,32 @@ function row(movement) {
         }
       </td>
     </tr>`;
+}
+
+// The before and after figures, described for what they actually are.
+//
+// For a stock-in or stock-out these are what the person was looking at when
+// they typed the entry, not the arithmetic the server performed. The server
+// applies the change as a delta, so an entry made while the connection was
+// down still applies correctly, and these two numbers may not match the
+// running total at the moment it finally landed. Saying "on screen" is the
+// honest label: anything else would read as though the system had
+// calculated a total it never calculated.
+//
+// For an adjustment they are exact. An adjustment is only accepted while
+// the figure counted from is still the figure on the server, so before and
+// after are precisely the totals either side of it.
+function beforeAfterNote(movement) {
+  if (movement.beforeQty === undefined || movement.afterQty === undefined) return '';
+
+  const before = Number(movement.beforeQty);
+  const after = Number(movement.afterQty);
+
+  if (movement.type === 'adjust') {
+    return `<div class="cb-cell-sub">System said ${before}, counted ${after}</div>`;
+  }
+
+  return `<div class="cb-cell-sub">${before} to ${after} on screen</div>`;
 }
 
 function pager() {

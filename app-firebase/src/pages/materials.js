@@ -39,6 +39,8 @@ import {
   wireReceiptPicker,
   submitStockForm,
 } from '../ui/stock-form.js';
+import { adjustStock, allowedReasons, reasonLabel } from '../lib/movements.js';
+import { QUEUED } from '../lib/sync.js';
 
 // Page state. Held at module level so a redraw after saving keeps the user's
 // filters, which is what the query string did in the PHP version.
@@ -128,6 +130,7 @@ function draw() {
 
     ${materialModal(manager, categories)}
     ${stockModal()}
+    ${manager ? adjustModal() : ''}
   `);
 
   wire();
@@ -271,7 +274,11 @@ function row(material, manager) {
               }
               ${
                 manager
-                  ? `<button type="button" class="dropdown-item" data-edit="${esc(material.id)}">Edit</button>
+                  ? `<div class="dropdown-divider"></div>
+                     <button type="button" class="dropdown-item" data-adjust="${esc(material.id)}">
+                       Adjust Stock
+                     </button>
+                     <button type="button" class="dropdown-item" data-edit="${esc(material.id)}">Edit</button>
                      <div class="dropdown-divider"></div>
                      <button type="button" class="dropdown-item is-danger" data-archive="${esc(material.id)}">Archive</button>`
                   : ''
@@ -448,6 +455,7 @@ function wire() {
   $('#cbAddMaterial', container)?.addEventListener('click', () => openModal(null));
   $('#cbMaterialForm', container)?.addEventListener('submit', save);
   $('#cbStockForm', container)?.addEventListener('submit', saveStock);
+  $('#cbAdjustForm', container)?.addEventListener('submit', saveAdjustment);
 }
 
 // Handlers that belong to the table itself. Kept separate because the table
@@ -478,6 +486,10 @@ function wireTable() {
 
   $$('[data-move]', container).forEach((button) => {
     button.addEventListener('click', () => openStockModal(button.dataset.move, button.dataset.id));
+  });
+
+  $$('[data-adjust]', container).forEach((button) => {
+    button.addEventListener('click', () => openAdjustModal(button.dataset.adjust));
   });
 }
 
@@ -765,5 +777,185 @@ async function saveStock(event) {
     if (errorBox) errorBox.innerHTML = alertHtml('danger', friendlyError(error));
     button.disabled = false;
     button.textContent = originalText;
+  }
+}
+
+// ============================================================
+// THE ADJUST STOCK MODAL
+//
+// Manager and webmaster only. The manager counts the shelf and types what is
+// actually there, and the system records the difference as a movement of its
+// own rather than quietly overwriting the figure.
+//
+// This is the honest way to handle a discrepancy. Before it existed, the only
+// way to correct a wrong total was a fake stock-in or stock-out, which would
+// have put a delivery or a withdrawal in the history that never happened. An
+// adjustment says what it is: the count was wrong, here is the real number,
+// and here is why.
+//
+// Unlike a stock-in or stock-out it needs a connection, because it is an
+// absolute figure. A count typed offline and synced an hour later would be a
+// count of the shelf as it was an hour ago, so the rules refuse it and the
+// failed-sync bar explains why.
+// ============================================================
+
+let adjustingMaterial = null;
+
+function adjustModal() {
+  return `
+    <div class="modal fade" id="cbAdjustModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form id="cbAdjustForm" novalidate>
+            <div class="modal-header">
+              <div>
+                <h5 class="modal-title">Adjust Stock</h5>
+                <p class="cb-modal-sub" id="cbAdjustSub"></p>
+              </div>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <div class="modal-body">
+              <div id="cbAdjustErrors"></div>
+
+              <div class="cb-stock-panel">
+                <span class="cb-label">System Says</span>
+                <span class="cb-stock-panel-num" id="cbAdjustCurrent"></span>
+              </div>
+
+              <div class="cb-field">
+                <label class="cb-field-label" for="adjCounted">Actual Counted Quantity</label>
+                <input type="number" class="cb-input" id="adjCounted" name="countedQuantity"
+                       min="0" step="1" required>
+                <div class="cb-help" id="cbAdjustPreview">
+                  Type what is actually on the shelf. The difference is recorded
+                  as an adjustment in the movement history.
+                </div>
+              </div>
+
+              <div class="cb-field">
+                <label class="cb-field-label" for="adjReason">Reason</label>
+                <select class="cb-select w-100" id="adjReason" name="reason" required>
+                  <option value="">-- Select a reason --</option>
+                </select>
+                <div class="cb-help">Required, so the correction can be explained later.</div>
+              </div>
+
+              <div class="cb-field mb-0">
+                <label class="cb-field-label" for="adjNotes">Notes <span class="text-muted">(optional)</span></label>
+                <textarea class="cb-textarea" id="adjNotes" name="notes" rows="2"
+                          placeholder="e.g. Two sheets found water damaged behind the rack"></textarea>
+              </div>
+            </div>
+
+            <div class="modal-footer">
+              <button type="button" class="cb-btn cb-btn-outline" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="cb-btn cb-btn-primary" id="cbAdjustSave">Save Adjustment</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>`;
+}
+
+function openAdjustModal(materialId) {
+  adjustingMaterial = catalog.materials.find((m) => m.id === materialId);
+  if (!adjustingMaterial) return;
+
+  const current = Number(adjustingMaterial.stockQuantity) || 0;
+
+  $('#cbAdjustSub', container).textContent = adjustingMaterial.name;
+  $('#cbAdjustErrors', container).innerHTML = '';
+  $('#cbAdjustCurrent', container).innerHTML =
+    `${current} <span class="text-muted" style="font-size:13px;font-weight:500;">${esc(adjustingMaterial.unit)}</span>`;
+
+  const form = $('#cbAdjustForm', container);
+  form.reset();
+
+  // Starts at the current figure, so a manager who opens this by mistake
+  // cannot save a zero by pressing the button
+  form.countedQuantity.value = current;
+
+  const reasonSelect = $('#adjReason', container);
+  reasonSelect.innerHTML =
+    '<option value="">-- Select a reason --</option>' +
+    allowedReasons('adjust')
+      .map((reason) => `<option value="${esc(reason)}">${esc(reasonLabel(reason))}</option>`)
+      .join('');
+
+  // Shows the difference as it is typed, so the manager sees the size of the
+  // correction before committing to it
+  const preview = $('#cbAdjustPreview', container);
+  const updatePreview = () => {
+    const counted = Number(form.countedQuantity.value);
+
+    if (!Number.isInteger(counted) || counted < 0) {
+      preview.textContent = 'Type a whole number, zero or more.';
+      return;
+    }
+
+    const difference = counted - current;
+    if (difference === 0) {
+      preview.textContent = 'Same as the system figure, so there is nothing to adjust.';
+      return;
+    }
+
+    preview.textContent =
+      difference > 0
+        ? `${difference} ${adjustingMaterial.unit} more than the system shows, recorded as a correction upward.`
+        : `${-difference} ${adjustingMaterial.unit} fewer than the system shows, recorded as a correction downward.`;
+  };
+
+  form.countedQuantity.addEventListener('input', updatePreview);
+  updatePreview();
+
+  modalFor('#cbAdjustModal').show();
+}
+
+async function saveAdjustment(event) {
+  event.preventDefault();
+
+  const form = event.target;
+  const button = $('#cbAdjustSave', container);
+  const errorBox = $('#cbAdjustErrors', container);
+
+  button.disabled = true;
+  button.textContent = 'Saving...';
+  errorBox.innerHTML = '';
+
+  try {
+    const result = await adjustStock({
+      material: adjustingMaterial,
+      countedQuantity: Number(form.countedQuantity.value),
+      reason: form.reason.value,
+      notes: form.notes.value.trim(),
+    });
+
+    modalFor('#cbAdjustModal').hide();
+
+    const direction = result.difference > 0 ? 'up' : 'down';
+    const size = Math.abs(result.difference);
+
+    message =
+      result.status === QUEUED
+        ? {
+            kind: 'danger',
+            text:
+              `The adjustment for ${adjustingMaterial.name} could not be confirmed, ` +
+              'because an adjustment needs a connection: it is a count of the shelf ' +
+              'right now. Check the connection and count again.',
+          }
+        : {
+            kind: 'success',
+            text:
+              `${adjustingMaterial.name} corrected ${direction} by ${size} ` +
+              `${adjustingMaterial.unit}, now ${result.afterQty} ${adjustingMaterial.unit}.`,
+          };
+
+    await renderMaterials(container);
+  } catch (error) {
+    errorBox.innerHTML = alertHtml('danger', friendlyError(error));
+    button.disabled = false;
+    button.textContent = 'Save Adjustment';
   }
 }
