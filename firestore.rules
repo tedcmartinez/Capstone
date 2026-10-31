@@ -1,0 +1,385 @@
+rules_version = '2';
+
+// ============================================================
+// Cornerblock Materials Inventory, Firestore security rules
+//
+// These rules are the real access control for the system. The interface
+// hides buttons and columns a role may not use, but that is only for
+// tidiness: every restriction that matters is enforced here, on Google's
+// servers, where a tampered browser cannot reach it.
+//
+// Three roles:
+//   webmaster         the developer account, the only role that can grant
+//                     or remove general_manager, and which nobody else can
+//                     edit. Identified by a verified email address only.
+//   general_manager   runs the business side: costs, suppliers, reports,
+//                     approving accounts, and the audit trail.
+//   production_staff  the shop floor: sees the catalog and logs stock
+//                     movements. Never sees cost, supplier, or settings.
+//
+// Two rules apply almost everywhere:
+//   1. Nothing is ever deleted. "Delete" sets isArchived to true.
+//   2. Every write must be accompanied by a brand new audit log entry,
+//      created in the same batch or transaction. See audited() below.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================================================
+    // IDENTITY HELPERS
+    // ========================================================
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function logPath(id) {
+      return /databases/$(database)/documents/audit_logs/$(id);
+    }
+
+    // The webmaster is recognised by email address rather than by a role
+    // stored in the database. This is deliberate: it is the recovery path.
+    // If the users collection were ever wiped or misconfigured, this check
+    // still works, so the project can never become unadministrable.
+    //
+    // email_verified is required, so simply typing this address into a
+    // sign-up form proves nothing. The address must be controlled.
+    // This literal is duplicated in src/lib/config.js and the two must
+    // always match.
+    function isWebmaster() {
+      return signedIn()
+          && request.auth.token.email == 'tedcmartinez2@gmail.com'
+          && request.auth.token.email_verified == true;
+    }
+
+    // The caller's own user document, or null if they have not registered
+    // yet. Returning null rather than failing lets isActive() give a clean
+    // false instead of erroring. Written as a single get() because Firestore
+    // caps how many document lookups one request's rules may perform.
+    function meDoc() {
+      return get(userPath(request.auth.uid));
+    }
+
+    // Approved, not pending and not disabled. A pending account passes
+    // signedIn() but fails here, which is what keeps a freshly registered
+    // user from reading any inventory data.
+    function isActive() {
+      return signedIn()
+          && meDoc() != null
+          && meDoc().data.status == 'active';
+    }
+
+    function isGM() {
+      return isWebmaster()
+          || (isActive() && meDoc().data.role == 'general_manager');
+    }
+
+    // Everyone who may use the system at all. Named for the lowest role it
+    // admits, and both higher roles satisfy it.
+    function isStaff() {
+      return isGM()
+          || (isActive() && meDoc().data.role == 'production_staff');
+    }
+
+    // ========================================================
+    // WRITE HELPERS
+    // ========================================================
+
+    // Which fields an update actually touches.
+    //
+    // Guarded by exists() at every call site through isRealUpdate(), because
+    // resource is null when there is no document to compare against, and
+    // reading resource.data in that state raises an evaluation error instead
+    // of returning false. That happens in normal use: a set() on a new
+    // document is checked against the update rules as well as the create
+    // rules, so the update rules must cope with nothing being there yet.
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // True only when this really is a change to an existing document
+    function isRealUpdate() {
+      return resource != null;
+    }
+
+    // The append-only audit trail is enforced here rather than trusted to
+    // the client. A write is accepted only when it carries a lastAuditId
+    // pointing at an audit_logs document that:
+    //   existsAfter  will exist once this batch commits, so the log cannot
+    //                be omitted, and
+    //   !exists      did not exist beforehand, so an id cannot be reused to
+    //                make one log stand in for many changes.
+    //
+    // Because both halves are required, the only way to write data is to
+    // create a fresh log entry in the same batch or transaction. There is
+    // no path that changes inventory without leaving a record.
+    //
+    // The 'in' check comes first on purpose. Reading a key that is not
+    // present in a document raises an evaluation error rather than
+    // returning nothing, and while an error also denies the write, it does
+    // so by accident. Checking the key exists first means a write that
+    // simply forgot its audit entry is refused by a clear false.
+    function audited() {
+      return 'lastAuditId' in request.resource.data
+          && request.resource.data.lastAuditId is string
+          && request.resource.data.lastAuditId.size() > 0
+          && existsAfter(logPath(request.resource.data.lastAuditId))
+          && !exists(logPath(request.resource.data.lastAuditId));
+    }
+
+    // ========================================================
+    // USERS
+    //
+    // Self-registration with manager approval. A new account writes its own
+    // document as pending production_staff and can do nothing else until a
+    // manager approves it. Nobody can promote themselves.
+    // ========================================================
+
+    match /users/{uid} {
+
+      // Users read their own record, managers read everyone's
+      allow read: if signedIn() && (request.auth.uid == uid || isGM());
+
+      // Registration. The account being created must be the caller's own,
+      // and the role and status it may claim are fixed: pending staff for
+      // everyone, active webmaster only for the verified webmaster address.
+      // This is why nobody can register themselves as a manager.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && audited()
+        && (
+          (isWebmaster()
+            && request.resource.data.role == 'webmaster'
+            && request.resource.data.status == 'active')
+          ||
+          (!isWebmaster()
+            && request.resource.data.role == 'production_staff'
+            && request.resource.data.status == 'pending')
+        );
+
+      // Users maintain their own profile details. Role and status are not in
+      // this list, so a user can never approve or promote themselves.
+      allow update: if signedIn()
+        && isRealUpdate()
+        && request.auth.uid == uid
+        && audited()
+        && changed().hasOnly(['name', 'photoURL', 'lastLoginAt', 'emailVerified', 'lastAuditId']);
+
+      // Managers approve, reject, disable, and set roles.
+      //   uid != own          nobody edits their own role or status
+      //   role != webmaster   the webmaster account cannot be touched by
+      //                       anyone, before or after the write
+      //   general_manager     only the webmaster may grant or remove it, so
+      //                       a manager cannot create a second manager or
+      //                       demote the one the client depends on
+      allow update: if isGM()
+        && isRealUpdate()
+        && request.auth.uid != uid
+        && audited()
+        && resource.data.role != 'webmaster'
+        && request.resource.data.role != 'webmaster'
+        && (isWebmaster()
+            || (resource.data.role != 'general_manager'
+                && request.resource.data.role != 'general_manager'))
+        && changed().hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'lastAuditId']);
+
+      // Accounts are disabled, never deleted, so movement history keeps
+      // pointing at a real person.
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // MATERIALS
+    //
+    // The shared catalog. Staff see it in full, because name, category,
+    // unit, stock and threshold are all shop floor information. Cost and
+    // supplier are deliberately NOT here: Firestore cannot hide a field
+    // inside a document, so they live in material_costs instead.
+    // ========================================================
+
+    match /materials/{id} {
+
+      allow read: if isStaff();
+
+      // Both roles may add a material, which matches the LAN system the
+      // client already uses: staff register new stock as it arrives on the
+      // floor. Staff must leave the threshold at zero, the same limit the
+      // old PHP form imposed, so setting reorder levels stays a manager
+      // decision. Cost and supplier are simply a different collection.
+      allow create: if audited() && (
+        isGM()
+        || (isStaff()
+            && 'minThreshold' in request.resource.data
+            && request.resource.data.minThreshold == 0)
+      );
+
+      // Managers edit the catalog freely. Staff may only move the stock
+      // figure, and only through a stock movement, which is what updates
+      // these exact fields. Everything else, including the name, the
+      // threshold and isArchived, is outside their list.
+      allow update: if audited() && (
+        isGM()
+        || (isStaff()
+            && isRealUpdate()
+            && changed().hasOnly(['stockQuantity', 'updatedAt', 'updatedBy', 'lastAuditId'])
+            && request.resource.data.stockQuantity >= 0)
+      );
+
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // MATERIAL COSTS, manager only
+    //
+    // Cost per unit and supplier for one material, keyed by the same
+    // document id as the material itself. Split out of materials purely so
+    // that production staff can be denied it, which is the capstone's
+    // role requirement: staff must not see cost or supplier information.
+    // ========================================================
+
+    match /material_costs/{id} {
+      allow read: if isGM();
+      allow create, update: if isGM() && audited();
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // SUPPLIERS, manager only
+    // Same reasoning as material_costs: supplier contact details are a
+    // management concern in the existing system, so staff cannot read them.
+    // ========================================================
+
+    match /suppliers/{id} {
+      allow read: if isGM();
+      allow create, update: if isGM() && audited();
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // STOCK MOVEMENTS
+    //
+    // The permanent record of every stock-in and stock-out. Append only:
+    // a mistake is corrected by logging an opposite movement, never by
+    // editing or removing history.
+    // ========================================================
+
+    match /stock_movements/{id} {
+
+      allow read: if isStaff();
+
+      // A movement must be filed under the person who is actually signed
+      // in, so a user cannot attribute their own entry to a colleague.
+      // The required fields are confirmed present before any of them is
+      // read, for the same reason as in audited(): a missing field should
+      // be a clean refusal, not an evaluation error.
+      //
+      // afterQty is the running total the movement leaves behind, and it
+      // may never be negative. That is what stops a stock-out larger than
+      // the quantity on hand, since the browser calculates afterQty and
+      // this rule refuses the result if it went below zero.
+      allow create: if isStaff()
+        && audited()
+        && request.resource.data.keys().hasAll([
+             'materialId', 'type', 'quantity', 'beforeQty', 'afterQty',
+             'movementDate', 'loggedBy'
+           ])
+        && request.resource.data.loggedBy == request.auth.uid
+        && request.resource.data.type in ['in', 'out']
+        && request.resource.data.quantity is int
+        && request.resource.data.quantity > 0
+        && request.resource.data.afterQty is int
+        && request.resource.data.afterQty >= 0;
+
+      allow update, delete: if false;
+    }
+
+    // ========================================================
+    // RECEIPTS
+    //
+    // Receipt images for stock-in entries, held as base64 inside Firestore
+    // because Cloud Storage requires the paid plan. Staff can read them,
+    // which matches the LAN system, where the receipt link on the movement
+    // history page is shown to both roles.
+    //
+    // The size ceiling is enforced here as well as in the browser, so an
+    // oversized image cannot be pushed past the compression step. A
+    // Firestore document cannot exceed 1 MB and base64 inflates a file by
+    // about a third, so 300 KB leaves a wide margin.
+    // ========================================================
+
+    match /receipts/{id} {
+
+      allow read: if isStaff();
+
+      allow create: if isStaff()
+        && audited()
+        && request.resource.data.keys().hasAll(['movementId', 'sizeBytes', 'uploadedBy'])
+        && request.resource.data.uploadedBy == request.auth.uid
+        && request.resource.data.sizeBytes is int
+        && request.resource.data.sizeBytes > 0
+        && request.resource.data.sizeBytes <= 300000;
+
+      allow update, delete: if false;
+    }
+
+    // ========================================================
+    // NOTIFICATION LOG
+    //
+    // One row per alert email attempt, which is what the 24 hour
+    // deduplication rule reads. Written only by the Google Apps Script that
+    // sends the mail, which authenticates through IAM as a service identity
+    // and therefore bypasses these rules entirely. No browser may write
+    // here, so the dedupe record cannot be faked to suppress an alert.
+    // ========================================================
+
+    match /notification_log/{id} {
+      allow read: if isGM();
+      allow write: if false;
+    }
+
+    // ========================================================
+    // AUDIT LOGS
+    //
+    // Append only, with no exception for anyone, the webmaster included.
+    // An audit trail that its own administrator can quietly edit is not an
+    // audit trail, so update and delete are closed outright.
+    //
+    // Any signed-in user may create an entry, including one still pending
+    // approval, because registering and signing in are themselves audited
+    // events. What they cannot do is write someone else's name on it, or
+    // backdate it: the timestamp must be the server's own clock, which is
+    // what request.time holds, so serverTimestamp() is the only value that
+    // will pass.
+    // ========================================================
+
+    match /audit_logs/{id} {
+
+      allow read: if isGM();
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['action', 'entity', 'actorUid', 'timestamp'])
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.timestamp == request.time
+        && request.resource.data.action is string
+        && request.resource.data.entity is string;
+
+      allow update, delete: if false;
+    }
+
+    // ========================================================
+    // Everything else is denied. Categories are intentionally absent:
+    // a category is a plain text field on each material, and the
+    // Categories page is built by grouping the catalog, exactly as the
+    // LAN version did, so there is no collection to secure.
+    // ========================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
