@@ -38,6 +38,13 @@ import { renderCategories } from './pages/categories.js';
 import { renderSuppliers } from './pages/suppliers.js';
 import { renderMovements } from './pages/movements.js';
 import { renderStockIn, renderStockOut } from './pages/stock.js';
+import { renderDashboard } from './pages/dashboard.js';
+import {
+  renderInventoryReport,
+  renderLowStockReport,
+  renderMovementReport,
+  renderValueReport,
+} from './pages/reports.js';
 import { esc } from './lib/dom.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
@@ -78,11 +85,14 @@ route('/movements/stockout', async () => renderStockOut(mountShell()));
 // The remaining pages are built in the steps that follow. They are
 // registered now so the sidebar links resolve rather than falling through
 // to the not-found screen, and each says plainly that it is not ready.
-route('/dashboard', () => placeholder('Dashboard', 'step 7'), { manager: true });
-route('/reports', () => placeholder('Inventory Report', 'step 7'), { manager: true });
-route('/reports/lowstock', () => placeholder('Low Stock Report', 'step 7'), { manager: true });
-route('/reports/movement', () => placeholder('Movement Report', 'step 7'), { manager: true });
-route('/reports/value', () => placeholder('Inventory Value Report', 'step 7'), { manager: true });
+// The manager's overview and the four reports. All manager only, because
+// every one of them exposes cost information, which is why the PHP
+// controller gated the whole class rather than individual actions.
+route('/dashboard', async () => renderDashboard(mountShell()), { manager: true });
+route('/reports', async () => renderInventoryReport(mountShell()), { manager: true });
+route('/reports/lowstock', async () => renderLowStockReport(mountShell()), { manager: true });
+route('/reports/movement', async () => renderMovementReport(mountShell()), { manager: true });
+route('/reports/value', async () => renderValueReport(mountShell()), { manager: true });
 route('/checklist', () => placeholder('Reorder Checklist', 'step 9'), { manager: true });
 route('/audit', () => placeholder('Audit Trail', 'step 8'), { manager: true });
 route('/settings', () => placeholder('Settings', 'step 9'), { manager: true });
