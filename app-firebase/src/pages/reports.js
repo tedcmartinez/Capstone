@@ -684,7 +684,9 @@ function wireReportFilters(names) {
         const field = form.elements[name];
         if (field && field.value) next[name] = field.value;
       }
-      setQuery(next);
+      // A report rebuilds itself from the address, so it asks for the route
+      // to be run again rather than redrawing in place
+      setQuery(next, { reload: true });
     });
   });
 }

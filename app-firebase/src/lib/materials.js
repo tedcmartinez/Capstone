@@ -237,6 +237,7 @@ export async function createMaterial(input) {
     action: 'material.create',
     entity: 'materials',
     entityId: id,
+    materialId: id,
     after: {
       name: material.name,
       category: material.category,
@@ -284,6 +285,7 @@ export async function updateMaterial(id, existing, input) {
         action: 'material.update',
         entity: 'materials',
         entityId: id,
+        materialId: id,
         before: catalogDiff.before,
         after: catalogDiff.after,
         summary: `Edited ${proposed.name} (${describeChanges(catalogDiff.after)})`,
@@ -303,6 +305,7 @@ export async function updateMaterial(id, existing, input) {
           action: 'material_cost.update',
           entity: 'material_costs',
           entityId: id,
+          materialId: id,
           before: costDiff.before,
           after: costDiff.after,
           summary:
@@ -333,6 +336,7 @@ export async function archiveMaterial(id, material) {
       action: 'material.archive',
       entity: 'materials',
       entityId: id,
+      materialId: id,
       before: { isArchived: false },
       after: { isArchived: true },
       summary:

@@ -59,8 +59,16 @@ service cloud.firestore {
     // sign-up form proves nothing. The address must be controlled.
     // This literal is duplicated in src/lib/config.js and the two must
     // always match.
+    //
+    // The 'in' checks guard a token with no email claim at all, such as an
+    // anonymous sign-in. Reading a missing claim is an evaluation error,
+    // which denies, but by accident. Every sign-in method this system
+    // offers carries an email, so this cannot happen today; it is here so
+    // that adding one later cannot turn this check into an error.
     function isWebmaster() {
       return signedIn()
+          && 'email' in request.auth.token
+          && 'email_verified' in request.auth.token
           && request.auth.token.email == 'tedcmartinez2@gmail.com'
           && request.auth.token.email_verified == true;
     }

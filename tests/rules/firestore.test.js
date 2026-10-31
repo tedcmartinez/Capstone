@@ -166,6 +166,20 @@ describe('webmaster identity', () => {
     );
   });
 
+  it('4. a token carrying no email at all is never the webmaster', async () => {
+    // An anonymous sign-in, for example. Not something this system offers,
+    // but adding one later must not turn the webmaster check into an error.
+    const db = env.authenticatedContext('uid_noemail', {}).firestore();
+
+    await assertFails(
+      auditedSet(db, 'uid_noemail', ['users', 'uid_noemail'], {
+        name: 'No Email',
+        role: 'webmaster',
+        status: 'active',
+      })
+    );
+  });
+
   it('4. look-alike addresses are never the webmaster', async () => {
     const lookalikes = [
       'tedcmartinez2@gmail.com.evil.com',

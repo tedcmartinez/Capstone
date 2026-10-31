@@ -46,6 +46,7 @@ import {
   renderMovementReport,
   renderValueReport,
 } from './pages/reports.js';
+import { renderAudit } from './pages/audit.js';
 import { esc } from './lib/dom.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
@@ -95,7 +96,7 @@ route('/reports/lowstock', async () => renderLowStockReport(mountShell()), { man
 route('/reports/movement', async () => renderMovementReport(mountShell()), { manager: true });
 route('/reports/value', async () => renderValueReport(mountShell()), { manager: true });
 route('/checklist', () => placeholder('Reorder Checklist', 'step 9'), { manager: true });
-route('/audit', () => placeholder('Audit Trail', 'step 8'), { manager: true });
+route('/audit', async () => renderAudit(mountShell()), { manager: true });
 route('/settings', () => placeholder('Settings', 'step 9'), { manager: true });
 
 setNotFound(() => {

@@ -62,6 +62,13 @@ function buildEntry(entry) {
     entity: entry.entity,
     entityId: entry.entityId ?? null,
 
+    // The material the change concerns, where there is one. entityId alone
+    // is not enough to find a material's history: for a stock movement it
+    // is the movement's own id, so filtering the trail by material would
+    // miss every stock-in, stock-out and adjustment, which are the entries
+    // that matter most. Null for users, suppliers and sign-ins.
+    materialId: entry.materialId ?? null,
+
     actorUid: actor?.uid ?? null,
     actorEmail: actor?.email ?? null,
     actorName: actor?.name ?? null,

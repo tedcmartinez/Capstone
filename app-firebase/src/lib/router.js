@@ -76,7 +76,20 @@ export function allQueryParams() {
 // filter does not fill the back button with every intermediate state. The
 // filters stay in the URL, which is what made the PHP pages shareable and
 // bookmarkable, and that behaviour is kept.
-export function setQuery(params, { replace = true } = {}) {
+//
+// By default this ONLY rewrites the address. It does not draw anything.
+//
+// It used to navigate, which re-ran the whole route, and that was a bug: the
+// catalog's live search updates the URL on every keystroke, so each letter
+// typed reloaded the entire catalog from Firestore and redrew the page,
+// wiping the search box mid-word. Movement History had the same problem in
+// a quieter form, loading twice per filter change with the two loads racing
+// each other. Both pages redraw themselves from data already in hand, so
+// all they need from here is the address.
+//
+// reload: true re-runs the route, for a page that has nothing to redraw
+// from and genuinely wants to start again, which is how the reports work.
+export function setQuery(params, { reload = false } = {}) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== '' && value !== null && value !== undefined) {
@@ -85,7 +98,9 @@ export function setQuery(params, { replace = true } = {}) {
   }
   const query = search.toString();
   const url = currentPath() + (query ? `?${query}` : '');
-  navigate(url, { replace });
+
+  window.history.replaceState({}, '', url);
+  if (reload) resolve();
 }
 
 // ============================================================

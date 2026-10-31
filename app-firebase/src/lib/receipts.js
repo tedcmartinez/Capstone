@@ -15,7 +15,7 @@
 import { doc, getDoc, serverTimestamp } from 'firebase/firestore';
 
 import { db } from './firebase.js';
-import { auditedWrite, newDocId } from './audit.js';
+import { newDocId } from './audit.js';
 import { currentUser } from './session.js';
 import {
   RECEIPT_MAX_BYTES,
@@ -188,17 +188,4 @@ export async function loadReceipt(receiptId) {
     // Rebuilt into something an <img> can display
     dataUrl: `data:${data.mimeType};base64,${data.dataBase64}`,
   };
-}
-
-// Records that a receipt was looked at. The audit action list includes
-// receipt.upload for the storing side; this is only used where an explicit
-// record of viewing is wanted, and is not called on every view.
-export async function logReceiptUpload(receiptId, movementId, materialName, sizeBytes) {
-  await auditedWrite([], {
-    action: 'receipt.upload',
-    entity: 'receipts',
-    entityId: receiptId,
-    after: { movementId, sizeBytes },
-    summary: `Attached a receipt image to the stock-in for ${materialName}`,
-  });
 }

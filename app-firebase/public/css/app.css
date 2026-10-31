@@ -368,3 +368,59 @@
 .cb-alert svg {
     flex: 0 0 auto;
 }
+
+/* ============================================================
+   10. AUDIT TRAIL DETAIL
+   The entry's facts as a two column list, and the before and
+   after comparison beneath it. A changed field is tinted so the
+   eye goes straight to what actually moved.
+   ============================================================ */
+
+.cb-detail-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 18px;
+    margin: 0;
+    font-size: 13px;
+}
+
+.cb-detail-list dt {
+    color: var(--cb-muted);
+    font-weight: 600;
+}
+
+.cb-detail-list dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.cb-detail-list dd .text-muted {
+    margin-left: 6px;
+}
+
+.cb-diff td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.cb-diff .cb-diff-arrow {
+    width: 1%;
+    color: var(--cb-faint);
+    text-align: center;
+}
+
+.cb-diff .cb-diff-before {
+    color: var(--cb-muted);
+}
+
+.cb-diff tr.is-changed .cb-diff-before {
+    color: var(--cb-red);
+    text-decoration: line-through;
+    text-decoration-color: rgba(185, 28, 28, 0.4);
+}
+
+.cb-diff tr.is-changed .cb-diff-after {
+    color: var(--cb-green);
+    font-weight: 600;
+}

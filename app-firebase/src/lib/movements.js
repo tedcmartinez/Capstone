@@ -176,9 +176,16 @@ export async function logMovement({ type, material, quantity, reason, reference,
       action: type === 'in' ? 'stock.in' : 'stock.out',
       entity: 'stock_movements',
       entityId: movementId,
+      materialId: material.id,
       before: { stockQuantity: beforeQty },
-      after: { stockQuantity: afterQty },
-      summary,
+      // A receipt is stored in the same batch as its stock-in, so it is
+      // recorded in this entry rather than in one of its own. One write,
+      // one record: there is no moment where the movement exists and the
+      // receipt does not, so there is nothing a second entry would add.
+      after: receiptRef
+        ? { stockQuantity: afterQty, receiptId: receiptRef.id }
+        : { stockQuantity: afterQty },
+      summary: receiptRef ? `${summary}, with receipt attached` : summary,
     },
     { track: summary }
   );
@@ -297,6 +304,7 @@ export async function adjustStock({ material, countedQuantity, reason, notes }) 
       action: 'stock.adjust',
       entity: 'stock_movements',
       entityId: movementId,
+      materialId: material.id,
       before: { stockQuantity: beforeQty },
       after: { stockQuantity: afterQty },
       summary,
