@@ -1,0 +1,114 @@
+/* Cornerblock Inventory, styles that exist only in the cloud version.
+   style.css is the original brand stylesheet and is kept byte for byte
+   as it was in the LAN version, so anything new goes here instead.
+   All colors below come from the design tokens defined in style.css.
+
+   Sections:
+     1. Boot screen (shown while Firebase decides who is signed in)
+     2. Account gate screens (pending approval, account disabled)
+*/
+
+/* ============================================================
+   1. BOOT SCREEN
+   The app cannot know the signed-in user's role until Firebase
+   Auth answers, which takes a moment on a cold load. This screen
+   fills that gap so the page never flashes the wrong view first.
+   ============================================================ */
+
+.cb-boot {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background-color: var(--cb-bg);
+}
+
+.cb-boot-mark {
+    width: 54px;
+    height: 54px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--cb-radius);
+    background-color: var(--cb-brown);
+    color: var(--cb-orange);
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+.cb-boot-text {
+    margin: 0;
+    color: var(--cb-muted);
+    font-size: 14px;
+}
+
+/* ============================================================
+   2. ACCOUNT GATE SCREENS
+   A newly registered account is 'pending' until the general
+   manager approves it, and can be set back to 'disabled' later.
+   Neither state may see any inventory data, so both get this
+   standalone centered card instead of the normal app shell.
+   ============================================================ */
+
+.cb-gate {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background-color: var(--cb-bg);
+}
+
+.cb-gate-card {
+    width: 100%;
+    max-width: 440px;
+    padding: 36px 32px;
+    text-align: center;
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow);
+}
+
+.cb-gate-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+}
+
+.cb-gate-icon.is-pending {
+    background-color: var(--cb-amber-bg);
+    color: var(--cb-amber);
+}
+
+.cb-gate-icon.is-disabled {
+    background-color: var(--cb-red-bg);
+    color: var(--cb-red);
+}
+
+.cb-gate-title {
+    margin: 0 0 8px;
+    color: var(--cb-brown);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.cb-gate-text {
+    margin: 0 0 22px;
+    color: var(--cb-muted);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.cb-gate-email {
+    display: block;
+    margin-bottom: 22px;
+    color: var(--cb-text);
+    font-size: 13px;
+    font-weight: 600;
+}

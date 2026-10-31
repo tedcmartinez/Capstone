@@ -1,0 +1,1618 @@
+/* Cornerblock Inventory System, custom styles layered on top of Bootstrap 5.
+   Organised in numbered sections so any part is easy to find:
+     1. Local fonts
+     2. Design tokens (colors, spacing, radius, shadows)
+     3. Base typography
+     4. App shell (sidebar, topbar, content)
+     5. Cards and KPI tiles
+     6. Inventory health bar
+     7. Status badges and pills
+     8. Tables
+     9. Buttons, forms, filters
+    10. Modals and quantity stepper
+    11. Chart
+    12. Empty states and alerts
+    13. Login page
+    14. Responsive rules
+    15. Print rules
+*/
+
+/* ============================================================
+   1. LOCAL FONTS
+   Served from public/assets/fonts so the system works fully
+   offline on the office LAN (no Google Fonts CDN dependency).
+   These are variable fonts, one file covers all weights.
+   ============================================================ */
+
+@font-face {
+    font-family: 'Montserrat';
+    src: url('../assets/fonts/montserrat.woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Playfair Display';
+    src: url('../assets/fonts/playfair-display.woff2') format('woff2');
+    font-weight: 400 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Merriweather';
+    src: url('../assets/fonts/merriweather.woff2') format('woff2');
+    font-weight: 300 900;
+    font-display: swap;
+}
+
+/* ============================================================
+   2. DESIGN TOKENS
+   Every color, radius and shadow used in the system is defined
+   once here. Changing a value here updates the whole app.
+   ============================================================ */
+
+:root {
+    /* Brand: dark brown is the identity, orange is the action color */
+    --cb-brown:       #412118;
+    --cb-brown-dark:  #2e170f;
+    --cb-brown-soft:  #5a3226;
+    --cb-orange:      #d2691e;
+    --cb-orange-dark: #a04b1a;
+    --cb-orange-soft: #fdf2e9;
+
+    /* Neutrals: warm white and light grey, no heavy pink fills */
+    --cb-bg:      #faf8f5;
+    --cb-surface: #ffffff;
+    --cb-hover:   #faf9f7;
+    --cb-border:  #e8e3dd;
+    --cb-divider: #f1ede8;
+
+    /* Text */
+    --cb-text:   #1c1917;
+    --cb-muted:  #78706a;
+    --cb-faint:  #a8a09a;
+
+    /* Status: green healthy, amber low, red out of stock */
+    --cb-green:      #15803d;
+    --cb-green-bg:   #e9f7ef;
+    --cb-amber:      #b45309;
+    --cb-amber-bg:   #fef4e6;
+    --cb-red:        #b91c1c;
+    --cb-red-bg:     #fdecec;
+
+    /* Shape and depth */
+    --cb-radius:    12px;
+    --cb-radius-sm: 8px;
+    --cb-shadow:    0 1px 2px rgba(28, 25, 23, 0.05), 0 1px 3px rgba(28, 25, 23, 0.04);
+    --cb-shadow-md: 0 4px 12px rgba(28, 25, 23, 0.08);
+    --cb-shadow-lg: 0 12px 32px rgba(28, 25, 23, 0.14);
+
+    /* Layout */
+    --cb-sidebar-w: 244px;
+    --cb-topbar-h:  62px;
+}
+
+/* ============================================================
+   3. BASE TYPOGRAPHY
+   Montserrat is the interface font (nav, tables, buttons, forms).
+   Playfair Display stays for page titles so the Cornerblock
+   identity carries through. Merriweather for body copy.
+   ============================================================ */
+
+body {
+    background-color: var(--cb-bg);
+    color: var(--cb-text);
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', Georgia, serif;
+    color: var(--cb-brown);
+    font-weight: 700;
+}
+
+/* Page title, e.g. "Dashboard" */
+.cb-page-title {
+    font-size: 26px;
+    margin: 0;
+    line-height: 1.2;
+}
+
+.cb-page-sub {
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-size: 13px;
+    color: var(--cb-muted);
+    margin: 4px 0 0;
+}
+
+/* Header block at the top of every page */
+.cb-page-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+}
+
+/* Section title, e.g. "Low Stock Materials" */
+.cb-section-title {
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--cb-text);
+    margin: 0;
+}
+
+.cb-section-sub {
+    font-size: 12px;
+    color: var(--cb-muted);
+    margin: 2px 0 0;
+}
+
+/* Small uppercase label used above groups and inside cards */
+.cb-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cb-muted);
+}
+
+.text-muted {
+    color: var(--cb-muted) !important;
+}
+
+/* ============================================================
+   4. APP SHELL
+   Fixed sidebar on the left, fixed topbar across the top, and
+   the scrolling content area in the remaining space.
+   ============================================================ */
+
+.cb-layout {
+    min-height: 100vh;
+}
+
+/* ---- Sidebar ---- */
+
+.cb-sidebar {
+    background-color: var(--cb-brown);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--cb-sidebar-w);
+    z-index: 1035;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    transition: transform 0.25s ease;
+}
+
+/* Thin scrollbar so the nav does not look bulky */
+.cb-sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.cb-sidebar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+
+/* Brand block at the top of the sidebar */
+.cb-sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 20px;
+    height: var(--cb-topbar-h);
+    flex-shrink: 0;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cb-sidebar-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--cb-radius-sm);
+    background-color: var(--cb-orange);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 15px;
+    flex-shrink: 0;
+}
+
+.cb-sidebar-word {
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.06em;
+    color: #ffffff;
+    text-transform: uppercase;
+    line-height: 1;
+}
+
+.cb-sidebar-tag {
+    display: block;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: none;
+    margin-top: 3px;
+}
+
+.cb-sidebar-nav {
+    padding: 14px 12px 20px;
+    flex-grow: 1;
+}
+
+/* Group heading, e.g. "INVENTORY" */
+.cb-nav-group {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.38);
+    padding: 0 12px;
+    margin: 18px 0 6px;
+}
+
+.cb-nav-group:first-child {
+    margin-top: 4px;
+}
+
+.cb-sidebar .cb-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 12px;
+    margin-bottom: 2px;
+    border-radius: var(--cb-radius-sm);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13.5px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.cb-sidebar .cb-nav-link svg {
+    flex-shrink: 0;
+    opacity: 0.75;
+}
+
+.cb-sidebar .cb-nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
+}
+
+/* Current page: orange fill, the strongest accent in the nav */
+.cb-sidebar .cb-nav-link.active {
+    background-color: var(--cb-orange);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(210, 105, 30, 0.35);
+}
+
+.cb-sidebar .cb-nav-link.active svg {
+    opacity: 1;
+}
+
+/* Count bubble on the right of a nav row (e.g. low stock items) */
+.cb-nav-count {
+    margin-left: auto;
+    background-color: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+}
+
+.cb-nav-count.is-alert {
+    background-color: var(--cb-red);
+}
+
+.cb-sidebar .cb-nav-link.active .cb-nav-count {
+    background-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Footer pinned to the bottom of the sidebar */
+.cb-sidebar-foot {
+    padding: 12px 20px 16px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
+}
+
+/* ---- Topbar ---- */
+
+.cb-main {
+    margin-left: var(--cb-sidebar-w);
+    padding-top: var(--cb-topbar-h);
+    min-width: 0; /* lets wide tables scroll instead of stretching the page */
+}
+
+.cb-topbar {
+    background-color: var(--cb-surface);
+    border-bottom: 1px solid var(--cb-border);
+    padding: 0 24px;
+    position: fixed;
+    top: 0;
+    left: var(--cb-sidebar-w);
+    right: 0;
+    height: var(--cb-topbar-h);
+    z-index: 1030;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* Hamburger, only visible on small screens */
+.cb-menu-btn {
+    display: none;
+    background: none;
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius-sm);
+    padding: 6px 9px;
+    color: var(--cb-brown);
+    cursor: pointer;
+}
+
+/* Search box in the topbar */
+.cb-topbar-search {
+    position: relative;
+    flex-grow: 1;
+    max-width: 420px;
+}
+
+.cb-topbar-search svg {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--cb-faint);
+    pointer-events: none;
+}
+
+.cb-topbar-search input {
+    width: 100%;
+    height: 38px;
+    padding: 0 14px 0 36px;
+    font-size: 13px;
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius-sm);
+    background-color: var(--cb-bg);
+    color: var(--cb-text);
+}
+
+.cb-topbar-search input::placeholder {
+    color: var(--cb-faint);
+}
+
+.cb-topbar-search input:focus {
+    outline: none;
+    border-color: var(--cb-orange);
+    background-color: var(--cb-surface);
+    box-shadow: 0 0 0 3px rgba(210, 105, 30, 0.12);
+}
+
+.cb-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+/* Round icon button (notifications) */
+.cb-icon-btn {
+    position: relative;
+    width: 38px;
+    height: 38px;
+    border: 1px solid transparent;
+    border-radius: var(--cb-radius-sm);
+    background: none;
+    color: var(--cb-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.cb-icon-btn:hover {
+    background-color: var(--cb-bg);
+    color: var(--cb-brown);
+}
+
+/* Red dot showing unread alert count */
+.cb-icon-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    background-color: var(--cb-red);
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--cb-surface);
+}
+
+/* User chip on the far right of the topbar */
+.cb-user-btn {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 10px 5px 5px;
+    border: 1px solid var(--cb-border);
+    border-radius: 999px;
+    background-color: var(--cb-surface);
+    cursor: pointer;
+    color: var(--cb-text);
+}
+
+.cb-user-btn:hover {
+    background-color: var(--cb-bg);
+}
+
+.cb-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background-color: var(--cb-brown);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.cb-user-name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.cb-user-role {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--cb-muted);
+}
+
+/* Dropdown panels used by the user menu and notifications */
+.cb-dropdown {
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow-lg);
+    padding: 6px;
+    font-size: 13px;
+    min-width: 210px;
+}
+
+.cb-dropdown .dropdown-item {
+    border-radius: var(--cb-radius-sm);
+    padding: 8px 10px;
+    font-size: 13px;
+    color: var(--cb-text);
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.cb-dropdown .dropdown-item:hover {
+    background-color: var(--cb-bg);
+    color: var(--cb-brown);
+}
+
+/* Destructive item (Delete) is separated and red */
+.cb-dropdown .dropdown-item.is-danger {
+    color: var(--cb-red);
+}
+
+.cb-dropdown .dropdown-item.is-danger:hover {
+    background-color: var(--cb-red-bg);
+    color: var(--cb-red);
+}
+
+.cb-dropdown .dropdown-header {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--cb-muted);
+    padding: 8px 10px 6px;
+}
+
+.cb-dropdown .dropdown-divider {
+    margin: 5px 0;
+    border-color: var(--cb-divider);
+}
+
+/* Notification list inside the bell dropdown */
+.cb-notif {
+    width: 320px;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.cb-notif-item {
+    display: flex;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: var(--cb-radius-sm);
+    text-decoration: none;
+    color: var(--cb-text);
+}
+
+.cb-notif-item:hover {
+    background-color: var(--cb-bg);
+}
+
+.cb-notif-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+}
+
+.cb-notif-title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.cb-notif-meta {
+    font-size: 11px;
+    color: var(--cb-muted);
+    margin-top: 2px;
+}
+
+/* ---- Content area ---- */
+
+.cb-content {
+    padding: 24px;
+    max-width: 1500px;
+}
+
+/* Backdrop shown behind the sidebar when open on mobile */
+.cb-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(28, 25, 23, 0.45);
+    z-index: 1034;
+}
+
+.cb-backdrop.show {
+    display: block;
+}
+
+/* ============================================================
+   5. CARDS AND KPI TILES
+   ============================================================ */
+
+.cb-card {
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow);
+}
+
+.cb-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--cb-divider);
+}
+
+.cb-card-body {
+    padding: 20px;
+}
+
+/* Removes double padding when a table sits directly inside a card */
+.cb-card-body.is-flush {
+    padding: 0;
+}
+
+/* ---- KPI tiles ---- */
+
+.cb-kpi {
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow);
+    padding: 18px 20px;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.cb-kpi:hover {
+    box-shadow: var(--cb-shadow-md);
+    transform: translateY(-1px);
+}
+
+/* Colored strip down the left edge marks the tile's meaning */
+.cb-kpi::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background-color: var(--cb-brown);
+}
+
+.cb-kpi.is-low::before   { background-color: var(--cb-amber); }
+.cb-kpi.is-out::before   { background-color: var(--cb-red); }
+.cb-kpi.is-value::before { background-color: var(--cb-green); }
+
+.cb-kpi-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.cb-kpi-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cb-muted);
+    letter-spacing: 0.02em;
+}
+
+/* Square icon tile in the corner of each KPI card */
+.cb-kpi-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--cb-radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+    flex-shrink: 0;
+}
+
+.cb-kpi.is-low   .cb-kpi-icon { background-color: var(--cb-amber-bg); color: var(--cb-amber); }
+.cb-kpi.is-out   .cb-kpi-icon { background-color: var(--cb-red-bg);   color: var(--cb-red); }
+.cb-kpi.is-value .cb-kpi-icon { background-color: var(--cb-green-bg); color: var(--cb-green); }
+
+.cb-kpi-value {
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.05;
+    color: var(--cb-text);
+    letter-spacing: -0.02em;
+}
+
+/* Peso amounts are long, so the value card uses a slightly smaller size */
+.cb-kpi-value.is-money {
+    font-size: 27px;
+}
+
+.cb-kpi.is-out .cb-kpi-value.is-critical { color: var(--cb-red); }
+.cb-kpi.is-low .cb-kpi-value.is-warning  { color: var(--cb-amber); }
+
+.cb-kpi-foot {
+    font-size: 12px;
+    color: var(--cb-muted);
+    margin-top: 6px;
+}
+
+/* ---- Quick action buttons ---- */
+
+.cb-quick {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 13px 15px;
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    text-decoration: none;
+    color: var(--cb-text);
+    font-size: 13.5px;
+    font-weight: 600;
+    box-shadow: var(--cb-shadow);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    height: 100%;
+}
+
+.cb-quick:hover {
+    border-color: var(--cb-orange);
+    box-shadow: var(--cb-shadow-md);
+    color: var(--cb-brown);
+    transform: translateY(-1px);
+}
+
+.cb-quick-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--cb-radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+    flex-shrink: 0;
+}
+
+.cb-quick-icon.is-in  { background-color: var(--cb-green-bg); color: var(--cb-green); }
+.cb-quick-icon.is-out { background-color: var(--cb-red-bg);   color: var(--cb-red); }
+
+/* ============================================================
+   6. INVENTORY HEALTH BAR
+   One segmented bar showing healthy / low / out proportions.
+   ============================================================ */
+
+.cb-health-bar {
+    display: flex;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background-color: var(--cb-divider);
+    margin-bottom: 18px;
+}
+
+.cb-health-seg {
+    height: 100%;
+    transition: width 0.4s ease;
+}
+
+.cb-health-seg.is-healthy { background-color: var(--cb-green); }
+.cb-health-seg.is-low     { background-color: var(--cb-amber); }
+.cb-health-seg.is-out     { background-color: var(--cb-red); }
+
+/* The three-up legend under the bar */
+.cb-health-legend {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.cb-health-item {
+    padding: 12px 14px;
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius-sm);
+    background-color: var(--cb-bg);
+}
+
+.cb-health-key {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cb-muted);
+    margin-bottom: 5px;
+}
+
+.cb-health-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.cb-health-swatch.is-healthy { background-color: var(--cb-green); }
+.cb-health-swatch.is-low     { background-color: var(--cb-amber); }
+.cb-health-swatch.is-out     { background-color: var(--cb-red); }
+
+.cb-health-num {
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.cb-health-pct {
+    font-size: 12px;
+    color: var(--cb-muted);
+    font-weight: 500;
+    margin-left: 5px;
+}
+
+/* ============================================================
+   7. STATUS BADGES AND PILLS
+   Used instead of coloring whole table rows.
+   ============================================================ */
+
+.cb-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1.5;
+}
+
+.cb-badge.is-healthy { background-color: var(--cb-green-bg); color: var(--cb-green); }
+.cb-badge.is-low     { background-color: var(--cb-amber-bg); color: var(--cb-amber); }
+.cb-badge.is-out     { background-color: var(--cb-red-bg);   color: var(--cb-red); }
+.cb-badge.is-neutral { background-color: var(--cb-divider);  color: var(--cb-muted); }
+.cb-badge.is-brand   { background-color: var(--cb-orange-soft); color: var(--cb-orange-dark); }
+
+/* Movement direction badge: IN +25 / OUT -20 */
+.cb-move {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.cb-move.is-in  { background-color: var(--cb-green-bg); color: var(--cb-green); }
+.cb-move.is-out { background-color: var(--cb-red-bg);   color: var(--cb-red); }
+
+.cb-move-qty {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Soft category chip */
+.cb-chip {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 6px;
+    background-color: var(--cb-bg);
+    border: 1px solid var(--cb-border);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--cb-muted);
+    white-space: nowrap;
+}
+
+/* ============================================================
+   8. TABLES
+   Neutral white rows, subtle dividers, generous row height.
+   ============================================================ */
+
+.cb-table {
+    width: 100%;
+    margin: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13.5px;
+}
+
+.cb-table thead th {
+    background-color: var(--cb-bg);
+    color: var(--cb-muted);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--cb-border);
+    white-space: nowrap;
+    text-align: left;
+}
+
+.cb-table tbody td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--cb-divider);
+    vertical-align: middle;
+    color: var(--cb-text);
+}
+
+.cb-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.cb-table tbody tr {
+    background-color: var(--cb-surface);
+    transition: background-color 0.12s ease;
+}
+
+.cb-table tbody tr:hover {
+    background-color: var(--cb-hover);
+}
+
+/* Material names read slightly stronger than the rest of the row */
+.cb-cell-name {
+    font-weight: 600;
+    color: var(--cb-text);
+}
+
+.cb-cell-sub {
+    font-size: 11.5px;
+    color: var(--cb-muted);
+    margin-top: 2px;
+}
+
+/* Stock number sits above its status badge */
+.cb-cell-stock {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+/* Currency and other figures line up on the right */
+.cb-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.cb-table thead th.cb-num {
+    text-align: right;
+}
+
+/* Sortable column headers */
+.cb-sort {
+    color: var(--cb-muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cb-sort:hover {
+    color: var(--cb-orange-dark);
+}
+
+.cb-sort.is-active {
+    color: var(--cb-orange-dark);
+}
+
+.cb-sort-arrow {
+    font-size: 9px;
+    opacity: 0.85;
+}
+
+/* Wrapper that lets a wide table scroll on its own */
+.cb-table-wrap {
+    overflow-x: auto;
+    border-radius: 0 0 var(--cb-radius) var(--cb-radius);
+}
+
+/* Compact three-dot action trigger */
+.cb-dots {
+    width: 30px;
+    height: 30px;
+    border: 1px solid transparent;
+    border-radius: var(--cb-radius-sm);
+    background: none;
+    color: var(--cb-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.cb-dots:hover,
+.cb-dots[aria-expanded="true"] {
+    background-color: var(--cb-bg);
+    border-color: var(--cb-border);
+    color: var(--cb-brown);
+}
+
+.cb-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+/* ============================================================
+   9. BUTTONS, FORMS, FILTERS
+   ============================================================ */
+
+.cb-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 9px 16px;
+    border-radius: var(--cb-radius-sm);
+    font-size: 13.5px;
+    font-weight: 600;
+    font-family: 'Montserrat', Arial, sans-serif;
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cb-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(210, 105, 30, 0.3);
+}
+
+/* Primary action: Cornerblock orange */
+.cb-btn-primary {
+    background-color: var(--cb-orange);
+    color: #ffffff;
+}
+
+.cb-btn-primary:hover {
+    background-color: var(--cb-orange-dark);
+    color: #ffffff;
+}
+
+/* Secondary: outlined, neutral */
+.cb-btn-outline {
+    background-color: var(--cb-surface);
+    border-color: var(--cb-border);
+    color: var(--cb-text);
+}
+
+.cb-btn-outline:hover {
+    background-color: var(--cb-bg);
+    border-color: var(--cb-muted);
+    color: var(--cb-brown);
+}
+
+/* Stock in / stock out semantic buttons */
+.cb-btn-in {
+    background-color: var(--cb-green);
+    color: #ffffff;
+}
+
+.cb-btn-in:hover {
+    background-color: #126b33;
+    color: #ffffff;
+}
+
+.cb-btn-out {
+    background-color: var(--cb-brown);
+    color: #ffffff;
+}
+
+.cb-btn-out:hover {
+    background-color: var(--cb-brown-dark);
+    color: #ffffff;
+}
+
+.cb-btn-danger {
+    background-color: var(--cb-red);
+    color: #ffffff;
+}
+
+.cb-btn-danger:hover {
+    background-color: #991616;
+    color: #ffffff;
+}
+
+.cb-btn:disabled,
+.cb-btn.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.cb-btn-sm {
+    padding: 6px 11px;
+    font-size: 12.5px;
+}
+
+/* Text link styled as a small action, e.g. "View All Movements" */
+.cb-link {
+    color: var(--cb-orange-dark);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.cb-link:hover {
+    color: var(--cb-brown);
+    text-decoration: underline;
+}
+
+/* ---- Form controls ---- */
+
+.cb-field {
+    margin-bottom: 16px;
+}
+
+.cb-field-label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--cb-text);
+    margin-bottom: 6px;
+}
+
+.cb-input,
+.cb-select,
+.cb-textarea {
+    width: 100%;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    font-family: 'Montserrat', Arial, sans-serif;
+    color: var(--cb-text);
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius-sm);
+}
+
+.cb-input:focus,
+.cb-select:focus,
+.cb-textarea:focus {
+    outline: none;
+    border-color: var(--cb-orange);
+    box-shadow: 0 0 0 3px rgba(210, 105, 30, 0.12);
+}
+
+.cb-input:disabled,
+.cb-textarea:disabled {
+    background-color: var(--cb-bg);
+    color: var(--cb-muted);
+}
+
+.cb-help {
+    font-size: 11.5px;
+    color: var(--cb-muted);
+    margin-top: 5px;
+}
+
+/* Filter bar above tables */
+.cb-filters {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.cb-filters .cb-search {
+    position: relative;
+    flex-grow: 1;
+    min-width: 220px;
+}
+
+.cb-filters .cb-search svg {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--cb-faint);
+    pointer-events: none;
+}
+
+.cb-filters .cb-search input {
+    padding-left: 36px;
+}
+
+.cb-filters .cb-select {
+    width: auto;
+    min-width: 150px;
+}
+
+/* ============================================================
+   10. MODALS AND QUANTITY STEPPER
+   ============================================================ */
+
+.modal-content {
+    border: none;
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow-lg);
+    overflow: hidden;
+}
+
+.modal-header {
+    background-color: var(--cb-surface);
+    border-bottom: 1px solid var(--cb-divider);
+    padding: 18px 22px;
+    align-items: flex-start;
+}
+
+.modal-title {
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--cb-text);
+}
+
+.cb-modal-sub {
+    font-size: 12.5px;
+    color: var(--cb-muted);
+    margin: 3px 0 0;
+}
+
+.modal-body {
+    padding: 22px;
+}
+
+.modal-footer {
+    background-color: var(--cb-bg);
+    border-top: 1px solid var(--cb-divider);
+    padding: 14px 22px;
+    gap: 8px;
+}
+
+/* Panel showing current stock inside a stock modal */
+.cb-stock-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 13px 16px;
+    background-color: var(--cb-bg);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius-sm);
+    margin-bottom: 18px;
+}
+
+.cb-stock-panel-num {
+    font-size: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Minus / value / plus quantity control */
+.cb-stepper {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius-sm);
+    overflow: hidden;
+    width: fit-content;
+    background-color: var(--cb-surface);
+}
+
+.cb-stepper button {
+    width: 42px;
+    height: 42px;
+    border: none;
+    background-color: var(--cb-bg);
+    color: var(--cb-brown);
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cb-stepper button:hover {
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+}
+
+.cb-stepper input {
+    width: 88px;
+    height: 42px;
+    border: none;
+    border-left: 1px solid var(--cb-border);
+    border-right: 1px solid var(--cb-border);
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'Montserrat', Arial, sans-serif;
+    color: var(--cb-text);
+    background-color: var(--cb-surface);
+    font-variant-numeric: tabular-nums;
+}
+
+.cb-stepper input:focus {
+    outline: none;
+    background-color: var(--cb-orange-soft);
+}
+
+/* Hide the browser's native number spinners */
+.cb-stepper input::-webkit-outer-spin-button,
+.cb-stepper input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.cb-stepper input[type=number] {
+    -moz-appearance: textfield;
+}
+
+/* ============================================================
+   11. CHART
+   Hand-drawn SVG bar chart, no external chart library so the
+   system keeps working offline on the LAN.
+   ============================================================ */
+
+.cb-chart {
+    width: 100%;
+    height: 220px;
+    overflow: visible;
+}
+
+.cb-chart-grid {
+    stroke: var(--cb-divider);
+    stroke-width: 1;
+}
+
+.cb-chart-axis {
+    fill: var(--cb-faint);
+    font-size: 10px;
+    font-family: 'Montserrat', Arial, sans-serif;
+}
+
+.cb-chart-bar-in {
+    fill: var(--cb-green);
+}
+
+.cb-chart-bar-out {
+    fill: var(--cb-orange);
+}
+
+.cb-chart-bar-in:hover,
+.cb-chart-bar-out:hover {
+    opacity: 0.8;
+}
+
+/* Legend above the chart */
+.cb-chart-legend {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.cb-chart-key {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cb-muted);
+}
+
+.cb-chart-key span {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.cb-chart-key.is-in span  { background-color: var(--cb-green); }
+.cb-chart-key.is-out span { background-color: var(--cb-orange); }
+
+/* ============================================================
+   12. EMPTY STATES AND ALERTS
+   ============================================================ */
+
+.cb-empty {
+    text-align: center;
+    padding: 44px 20px;
+    color: var(--cb-muted);
+}
+
+.cb-empty-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background-color: var(--cb-bg);
+    color: var(--cb-faint);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+}
+
+.cb-empty-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--cb-text);
+    margin-bottom: 4px;
+}
+
+.cb-empty-text {
+    font-size: 13px;
+    margin: 0;
+}
+
+/* Flat alert style matching the rest of the system */
+.cb-alert {
+    display: flex;
+    gap: 11px;
+    padding: 13px 16px;
+    border-radius: var(--cb-radius-sm);
+    font-size: 13.5px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+}
+
+.cb-alert.is-success { background-color: var(--cb-green-bg); border-color: #c9e9d5; color: #14532d; }
+.cb-alert.is-warning { background-color: var(--cb-amber-bg); border-color: #f7dcb8; color: #7c3d09; }
+.cb-alert.is-danger  { background-color: var(--cb-red-bg);   border-color: #f5cccc; color: #7f1d1d; }
+.cb-alert.is-info    { background-color: var(--cb-orange-soft); border-color: #f6ddc4; color: #7c3f12; }
+
+.cb-alert ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+/* ============================================================
+   13. LOGIN PAGE
+   ============================================================ */
+
+.cb-login {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background-color: var(--cb-brown);
+    /* Subtle warm gradient so the login screen feels branded */
+    background-image: radial-gradient(circle at 20% 20%, rgba(210, 105, 30, 0.22), transparent 55%);
+}
+
+.cb-login-card {
+    width: 100%;
+    max-width: 410px;
+    background-color: var(--cb-surface);
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow-lg);
+    overflow: hidden;
+}
+
+.cb-login-head {
+    text-align: center;
+    padding: 32px 30px 8px;
+}
+
+.cb-login-mark {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background-color: var(--cb-orange);
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 23px;
+    font-weight: 800;
+    margin-bottom: 14px;
+}
+
+.cb-login-word {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--cb-brown);
+}
+
+.cb-login-tag {
+    font-size: 12.5px;
+    color: var(--cb-muted);
+    margin-top: 5px;
+}
+
+.cb-login-body {
+    padding: 22px 30px 30px;
+}
+
+/* ============================================================
+   14. RESPONSIVE
+   Desktop keeps the sidebar pinned. Below 992px it slides in
+   over the content and is opened by the topbar hamburger.
+   ============================================================ */
+
+@media (max-width: 991.98px) {
+    .cb-sidebar {
+        transform: translateX(-100%);
+        box-shadow: var(--cb-shadow-lg);
+    }
+
+    /* Toggled by the hamburger button in app.js */
+    .cb-sidebar.is-open {
+        transform: translateX(0);
+    }
+
+    .cb-main {
+        margin-left: 0;
+    }
+
+    .cb-topbar {
+        left: 0;
+        padding: 0 16px;
+    }
+
+    .cb-menu-btn {
+        display: flex;
+    }
+
+    .cb-content {
+        padding: 18px 16px;
+    }
+
+    /* The user's name is hidden, the avatar alone identifies them */
+    .cb-user-text {
+        display: none;
+    }
+
+    .cb-user-btn {
+        padding: 4px;
+        border: none;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .cb-page-title {
+        font-size: 22px;
+    }
+
+    /* Health legend stacks instead of sitting three across */
+    .cb-health-legend {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .cb-kpi-value {
+        font-size: 27px;
+    }
+
+    .cb-kpi-value.is-money {
+        font-size: 22px;
+    }
+
+    /* Search moves out of the topbar on phones, the page has its own */
+    .cb-topbar-search {
+        display: none;
+    }
+
+    .cb-filters .cb-select,
+    .cb-filters .cb-search {
+        width: 100%;
+        flex-grow: 1;
+    }
+
+    .modal-body {
+        padding: 18px;
+    }
+}
+
+/* ============================================================
+   15. PRINT
+   Hide the shell so the reorder checklist prints cleanly.
+   ============================================================ */
+
+@media print {
+    .cb-sidebar,
+    .cb-topbar,
+    .cb-backdrop,
+    .d-print-none {
+        display: none !important;
+    }
+
+    .cb-main {
+        margin-left: 0;
+        padding-top: 0;
+    }
+
+    body {
+        background-color: #ffffff;
+    }
+
+    .cb-card {
+        border: 1px solid #cccccc;
+        box-shadow: none;
+    }
+}

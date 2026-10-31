@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cornerblock Inventory System</title>
+
+    <!-- Brand colour used by the browser and by the installed desktop window -->
+    <meta name="theme-color" content="#412118">
+
+    <!-- Bootstrap 5 and the Cornerblock stylesheet are served from public/ as
+         plain files, exactly as they were in the PHP version. style.css is
+         unchanged, including its relative font paths. -->
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <!-- Screens that only exist in the cloud version, so style.css stays unchanged -->
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<!-- The whole interface is rendered into this element by src/main.js.
+     Until Firebase reports who is signed in, a short loading state shows
+     so the page never flashes the wrong screen for the wrong role. -->
+<div id="app">
+    <div class="cb-boot">
+        <span class="cb-boot-mark">C</span>
+        <p class="cb-boot-text">Loading Cornerblock Inventory...</p>
+    </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+<script src="/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

@@ -1,8 +1,36 @@
-/vendor/
-config/email.config.php
-*.log
-.DS_Store
+# ============================================================
+# Legacy LAN-based PHP app (kept in legacy-php/ for reference)
+# ============================================================
+/legacy-php/vendor/
+legacy-php/config/email.config.php
 
 # Uploaded receipt images are runtime client data, keep the folder but not its contents
-public/uploads/receipts/*
-!public/uploads/receipts/.gitkeep
+legacy-php/public/uploads/receipts/*
+!legacy-php/public/uploads/receipts/.gitkeep
+
+# ============================================================
+# New Firebase web app
+# ============================================================
+node_modules/
+dist/
+.firebase/
+*.local
+
+# Firebase service-account keys must never be committed. The migration
+# script reads its key from a path outside this repo.
+*serviceAccount*.json
+*service-account*.json
+*-firebase-adminsdk-*.json
+
+# Local emulator and CLI state
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebaserc.local
+
+# ============================================================
+# General
+# ============================================================
+*.log
+.DS_Store
+Thumbs.db
