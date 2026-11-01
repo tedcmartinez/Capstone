@@ -82,6 +82,39 @@ describe('registration', () => {
     await assertFails(getDocs(collection(db, 'materials')));
   });
 
+  it('1. a pending user can read their own account and nothing else', async () => {
+    await seedPendingStaff(env, 'uid_pending');
+    await seedPendingStaff(env, 'uid_other');
+    for (const [collectionName, id] of [
+      ['materials', 'mat_1'],
+      ['material_costs', 'mat_1'],
+      ['suppliers', 'sup_1'],
+      ['categories', 'cat_1'],
+      ['stock_movements', 'mov_1'],
+      ['receipts', 'rec_1'],
+      ['audit_logs', 'log_1'],
+      ['notification_log', 'note_1'],
+    ]) {
+      await seedDoc(env, collectionName, id, { name: 'seeded' });
+    }
+
+    const db = asUser(env, 'uid_pending', 'pending@example.com');
+
+    // The one read the waiting screen makes, and keeps listening to
+    await assertSucceeds(getDoc(doc(db, 'users', 'uid_pending')));
+
+    await assertFails(getDoc(doc(db, 'users', 'uid_other')));
+    await assertFails(getDocs(collection(db, 'users')));
+    await assertFails(getDoc(doc(db, 'materials', 'mat_1')));
+    await assertFails(getDoc(doc(db, 'material_costs', 'mat_1')));
+    await assertFails(getDoc(doc(db, 'suppliers', 'sup_1')));
+    await assertFails(getDoc(doc(db, 'categories', 'cat_1')));
+    await assertFails(getDoc(doc(db, 'stock_movements', 'mov_1')));
+    await assertFails(getDoc(doc(db, 'receipts', 'rec_1')));
+    await assertFails(getDoc(doc(db, 'audit_logs', 'log_1')));
+    await assertFails(getDoc(doc(db, 'notification_log', 'note_1')));
+  });
+
   it('2. Google sign-up is treated the same way, provider is not a privilege', async () => {
     const db = asUser(env, 'uid_goog', 'googleuser@gmail.com', true);
 

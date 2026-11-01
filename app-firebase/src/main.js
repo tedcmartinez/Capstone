@@ -24,6 +24,7 @@ import {
   isPending,
   isDisabled,
   canUseApp,
+  landingPath,
 } from './lib/session.js';
 import { mountShell, resetShell } from './ui/shell.js';
 import { renderLogin } from './pages/login.js';
@@ -51,6 +52,7 @@ import { renderChecklist } from './pages/checklist.js';
 import { renderSettings } from './pages/settings.js';
 import { esc } from './lib/dom.js';
 import { registerServiceWorker } from './lib/pwa.js';
+import { watchAccount, stopWatchingAccount, nextStep } from './lib/accountWatch.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
 // guard can keep showing that screen instead of the login form.
@@ -162,9 +164,6 @@ setGuard((path) => {
   return null;
 });
 
-function landingPath() {
-  return isManager() ? '/dashboard' : '/materials';
-}
 
 // ============================================================
 // SCREEN SELECTION
@@ -217,5 +216,51 @@ watchAuth((user, error) => {
   // person's navigation is never briefly shown to the next.
   if (!user || webmasterVerification) resetShell();
 
+  // Listen for a manager changing this account while it is open. Stopped
+  // on sign-out, and for the webmaster verification screen, which has no
+  // account document yet.
+  if (user && !webmasterVerification) {
+    watchAccount(user.uid, accountChanged);
+  } else {
+    stopWatchingAccount();
+  }
+
   renderCurrentScreen();
 });
+
+// ============================================================
+// THE ACCOUNT CHANGED WHILE OPEN
+//
+// lib/accountWatch.js calls this when a manager approves, disables, or
+// changes the role of the signed-in account. The session already holds the
+// new role and status; this moves the person to the screen it allows,
+// exactly as a fresh page load would, without one.
+// ============================================================
+
+function accountChanged(before, after) {
+  closeOpenDialogs();
+
+  // The sidebar was drawn for the old role, so it is drawn again
+  resetShell();
+
+  // Just approved: straight into the app, at the role's starting page
+  if (nextStep(before, after) === 'enter') {
+    navigate(landingPath(), { replace: true });
+    return;
+  }
+
+  // Disabled, or still active with a different role. The guard sends a
+  // demoted manager off a manager-only page, and a disabled account to its
+  // explanation screen.
+  renderCurrentScreen();
+}
+
+// A form left open in a Bootstrap dialog belongs to the screen being
+// replaced. The dialog itself goes with that screen, but the dark backdrop
+// and the scroll lock Bootstrap puts on <body> would stay behind.
+function closeOpenDialogs() {
+  document.querySelectorAll('.modal-backdrop').forEach((backdrop) => backdrop.remove());
+  document.body.classList.remove('modal-open');
+  document.body.style.removeProperty('overflow');
+  document.body.style.removeProperty('padding-right');
+}

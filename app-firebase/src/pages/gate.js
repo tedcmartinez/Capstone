@@ -38,66 +38,57 @@ function gateScreen({ kind, iconKey, title, text, email, actions }) {
 
 // ============================================================
 // WAITING FOR APPROVAL
+//
+// Seen straight after registering, and by a pending account that signs in
+// later. There is no "check again" button: main.js listens to the account
+// (lib/accountWatch.js) and opens the app by itself once it is approved.
 // ============================================================
 
-export function renderPending() {
-  const user = currentUser();
-
-  const root = render('app', gateScreen({
+export function pendingHtml(email) {
+  return gateScreen({
     kind: 'pending',
     iconKey: 'pending',
-    title: 'Waiting for approval',
+    title: 'Request sent',
     text:
-      'Your account has been created and is waiting for the general manager ' +
-      'to approve it. You will be able to sign in and use the system as soon ' +
-      'as that is done.',
-    email: user?.email,
-    actions: `
-      <div id="cbGateMessage"></div>
-      <button type="button" class="cb-btn cb-btn-primary w-100" id="cbRecheck">
-        Check again
-      </button>
-      <button type="button" class="cb-btn cb-btn-outline w-100 mt-2" id="cbSignOut">
-        Sign out
-      </button>
-      ${
-        user && !user.emailVerified
-          ? `<p class="cb-help mt-3 mb-0">
-               Your email address is not confirmed yet. Check your inbox for
-               the confirmation link.
-             </p>`
-          : ''
-      }`,
-  }));
-
-  wireCommon(root);
-
-  // Re-reading the profile is the whole point of this button: the manager
-  // may have approved the account in the meantime.
-  $('#cbRecheck', root)?.addEventListener('click', () => window.location.reload());
-}
-
-// ============================================================
-// DISABLED
-// ============================================================
-
-export function renderDisabled() {
-  const user = currentUser();
-
-  const root = render('app', gateScreen({
-    kind: 'disabled',
-    iconKey: 'disabled',
-    title: 'Account disabled',
-    text:
-      'This account has been disabled and can no longer be used to sign in. ' +
-      'Contact the general manager if you believe this is a mistake.',
-    email: user?.email,
+      'Your account request has been sent to the General Manager. ' +
+      "You'll get access as soon as it's approved. You can keep this page " +
+      'open; it will open the app automatically.',
+    email,
     actions: `
       <button type="button" class="cb-btn cb-btn-outline w-100" id="cbSignOut">
         Sign out
       </button>`,
-  }));
+  });
+}
 
+export function renderPending() {
+  const root = render('app', pendingHtml(currentUser()?.email));
+  wireCommon(root);
+}
+
+// ============================================================
+// NO ACCESS
+//
+// Disabled accounts, which includes rejected requests: rejecting a request
+// sets the account to disabled. One plain sentence, never a Firebase error.
+// ============================================================
+
+export function disabledHtml(email) {
+  return gateScreen({
+    kind: 'disabled',
+    iconKey: 'disabled',
+    title: 'No access',
+    text: "Your account doesn't have access. Contact the General Manager.",
+    email,
+    actions: `
+      <button type="button" class="cb-btn cb-btn-outline w-100" id="cbSignOut">
+        Sign out
+      </button>`,
+  });
+}
+
+export function renderDisabled() {
+  const root = render('app', disabledHtml(currentUser()?.email));
   wireCommon(root);
 }
 

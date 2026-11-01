@@ -54,14 +54,33 @@ export async function signInWithEmail(email, password) {
   return credential.user;
 }
 
+// The name typed in the registration form, held while the account is set
+// up. Creating the account signs it in, which wakes the auth watcher at
+// once, and the watcher may start setting the account up before this
+// function does. Both read the name from here, so whichever goes first
+// stores the name that was typed rather than one made from the email.
+let registrationName = '';
+
 export async function registerWithEmail(name, email, password) {
-  const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  registrationName = name.trim();
+
+  let credential;
+  try {
+    credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  } catch (error) {
+    registrationName = '';
+    throw error;
+  }
 
   // The verification email is sent before anything else, so a user whose
   // account creation half-finished still gets the link.
   await sendEmailVerification(credential.user);
 
-  await bootstrapUser(credential.user, 'password', name.trim());
+  try {
+    await bootstrapUser(credential.user, 'password');
+  } finally {
+    registrationName = '';
+  }
   return credential.user;
 }
 
@@ -73,9 +92,15 @@ export async function signInWithGoogle() {
   provider.setCustomParameters({ prompt: 'select_account' });
 
   const credential = await signInWithPopup(auth, provider);
-  await bootstrapUser(credential.user, 'google.com');
+  return completeGoogleSignIn(credential.user);
+}
+
+// What follows the Google popup. Separate so the emulator tests can run it
+// without a popup, which a test cannot click through.
+export async function completeGoogleSignIn(firebaseUser) {
+  await bootstrapUser(firebaseUser, 'google.com');
   await logSignIn();
-  return credential.user;
+  return firebaseUser;
 }
 
 export function resetPassword(email) {
@@ -166,7 +191,33 @@ export class WebmasterVerificationRequired extends Error {
   }
 }
 
-export async function bootstrapUser(firebaseUser, provider, nameOverride = '') {
+// Setups in progress, one per account.
+//
+// Registering or signing in runs bootstrapUser() twice at the same moment:
+// once from the sign-in function, and once from the auth watcher, which
+// Firebase wakes as soon as the account is signed in. Each used to read
+// "no document yet" and each tried to create one. The second create
+// arrived at a document that now existed, so the rules judged it as an
+// update changing role, status and createdAt, and refused it. That refusal
+// was the "You do not have permission" message a new user saw straight
+// after registering.
+//
+// Now the second caller is handed the first caller's setup and waits for
+// the same result, so the account is set up exactly once.
+const bootstrapsInProgress = new Map();
+
+export function bootstrapUser(firebaseUser, provider, nameOverride = '') {
+  const uid = firebaseUser.uid;
+  if (!bootstrapsInProgress.has(uid)) {
+    const setup = setUpAccount(firebaseUser, provider, nameOverride).finally(() =>
+      bootstrapsInProgress.delete(uid)
+    );
+    bootstrapsInProgress.set(uid, setup);
+  }
+  return bootstrapsInProgress.get(uid);
+}
+
+async function setUpAccount(firebaseUser, provider, nameOverride) {
   const snapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
 
   if (snapshot.exists()) {
@@ -194,7 +245,7 @@ export async function bootstrapUser(firebaseUser, provider, nameOverride = '') {
   const status = claimsWebmaster ? STATUS_ACTIVE : STATUS_PENDING;
 
   const profile = {
-    name: nameOverride || firebaseUser.displayName || firebaseUser.email.split('@')[0],
+    name: nameOverride || registrationName || firebaseUser.displayName || firebaseUser.email.split('@')[0],
     email: firebaseUser.email,
     photoURL: firebaseUser.photoURL || null,
     provider,
@@ -212,7 +263,23 @@ export async function bootstrapUser(firebaseUser, provider, nameOverride = '') {
   // registration.
   setCurrentUser(toSessionUser(firebaseUser, provider, profile));
 
-  await auditedWrite(
+  try {
+    await createProfile(firebaseUser, profile, role, status, claimsWebmaster, provider);
+  } catch (error) {
+    // The same account signing in from a second window at the same moment
+    // can still create the document first. If it now exists, that is the
+    // account, and there is nothing to report.
+    const created = await getDoc(doc(db, 'users', firebaseUser.uid));
+    if (!created.exists()) throw error;
+    setCurrentUser(toSessionUser(firebaseUser, provider, created.data()));
+    return created.data();
+  }
+
+  return profile;
+}
+
+function createProfile(firebaseUser, profile, role, status, claimsWebmaster, provider) {
+  return auditedWrite(
     [{ type: 'set', collection: 'users', id: firebaseUser.uid, data: profile }],
     {
       action: 'user.register',
@@ -224,8 +291,6 @@ export async function bootstrapUser(firebaseUser, provider, nameOverride = '') {
         : `${profile.name} registered via ${providerLabel(provider)} and is awaiting approval`,
     }
   );
-
-  return profile;
 }
 
 // Merges the Firebase account with the Firestore profile into the one object

@@ -74,6 +74,10 @@ export const isStaffMember = () =>
 // Anyone approved to use the system at all
 export const canUseApp = () => isActive();
 
+// Where each role starts. The PHP router did exactly this: managers to the
+// dashboard, staff to the catalog, because the dashboard is manager only.
+export const landingPath = () => (isManager() ? '/dashboard' : '/materials');
+
 // Only the webmaster may make someone a general manager, so the client can
 // never be locked out of their own system: if every manager were removed,
 // the webmaster could still appoint one. Removing the role, by contrast, is
