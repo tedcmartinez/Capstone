@@ -8,6 +8,12 @@
     <!-- Brand colour used by the browser and by the installed desktop window -->
     <meta name="theme-color" content="#412118">
 
+    <!-- Installable app: the manifest names it and gives its icons, so
+         Chrome and Edge offer to install it as its own desktop window -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+
     <!-- Bootstrap 5 and the Cornerblock stylesheet are served from public/ as
          plain files, exactly as they were in the PHP version. style.css is
          unchanged, including its relative font paths. -->

@@ -50,6 +50,7 @@ import { renderAudit } from './pages/audit.js';
 import { renderChecklist } from './pages/checklist.js';
 import { renderSettings } from './pages/settings.js';
 import { esc } from './lib/dom.js';
+import { registerServiceWorker } from './lib/pwa.js';
 
 // Set while the webmaster address is waiting on email confirmation, so the
 // guard can keep showing that screen instead of the login form.
@@ -203,6 +204,9 @@ function renderCurrentScreen() {
 // callback below draws it once the role is known. Until then the loading
 // screen in index.html stays up.
 startRouter({ resolveImmediately: false });
+
+// Saves the app's files so the installed window opens offline
+registerServiceWorker();
 
 watchAuth((user, error) => {
   authResolved = true;

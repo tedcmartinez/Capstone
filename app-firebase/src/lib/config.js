@@ -91,11 +91,12 @@ export const STATUS_DISABLED = 'disabled';
 // caller's Firebase ID token and checks they are an active user before it
 // does anything.
 //
-// Filled in once the script is deployed in step 9. While it is empty the app
+// Deployed as version 1 of the web app. If this is ever emptied, the app
 // skips the alert call and says so, rather than failing a saved movement.
 // ============================================================
 
-export const APPS_SCRIPT_URL = '';
+export const APPS_SCRIPT_URL =
+  'https://script.google.com/macros/s/AKfycbwQ4xj3mts-MIa1x3zJXeGfhjbre5-TVTkLhzMd9NsEfy8mlXRz7MQRF8wk-c4SEy5X/exec';
 
 // ============================================================
 // RECEIPT IMAGES

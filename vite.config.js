@@ -7,9 +7,13 @@
 // src/main.js, so there is only one HTML entry point.
 
 import { defineConfig } from 'vite';
+import { precache } from './tools/vite-precache.mjs';
 
 export default defineConfig({
   root: 'app-firebase',
+
+  // Lists the built files for the service worker to save for offline use
+  plugins: [precache()],
 
   build: {
     // dist/ sits at the repo root, one level above the Vite root
