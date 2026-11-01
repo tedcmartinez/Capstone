@@ -59,15 +59,21 @@ Open https://console.cloud.google.com/apis/credentials?project=cornerblock-inven
 5. Open `Code.gs` and replace its contents with this folder's `Code.gs`.
 6. Save.
 
-### 4. Link the script to the Firebase project
+### 4. Link the script to the Firebase project, only if needed
 
-By default a script runs in a hidden Google Cloud project that Google creates for it, where the Firestore API is not turned on. Linking it to the Firebase project means its Firestore requests are made in the project where Firestore actually is. It also puts the script's logs next to the rest of the system's.
+Skip this step at first. Deploy (step 5), connect the app (step 6), then open **Settings**. Come back here only if Settings says **the Firestore API is not enabled for the Google Cloud project this script runs in**.
+
+By default a script runs in a hidden Google Cloud project that Google creates for it. Whether its Firestore requests then work depends on how Google attributes them, which is why this is checked rather than assumed. If they do not, linking the script to the Firebase project makes its requests in the project where Firestore actually is.
 
 1. In **Project Settings**, under **Google Cloud Platform (GCP) Project**, click **Change project**.
 2. Enter the project **number** `281463397004`. This is the project number, not the ID `cornerblock-inventory`.
 3. Click **Set project**.
+4. Approve the script's permissions again: open the editor, choose any function, and click **Run**. Linking changes the OAuth client the script runs under, so the earlier approval no longer applies.
+5. Click **Deploy**, then **Manage deployments**, the pencil icon, choose **New version**, and **Deploy**. The URL stays the same, so `config.js` does not change.
 
-If this is refused for permissions, the **Browser** role from step 1 has not taken effect yet. Wait a few minutes and try again.
+If step 3 is refused for permissions, the **Browser** role from step 1 has not taken effect yet. Wait a few minutes and try again.
+
+**If you never need this step, remove the Browser role** from `cornerblock.alerts@gmail.com`. It exists only so the account can see the project when linking, and an account should hold no access it does not use.
 
 ### 5. Deploy it
 
