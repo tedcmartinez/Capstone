@@ -28,6 +28,7 @@ import {
   friendlyError,
   personName,
 } from '../lib/dom.js';
+import { categoryLabel } from '../lib/format.js';
 import {
   loadCatalog,
   lowStockOf,
@@ -378,7 +379,7 @@ function lowStockRow(material) {
     <tr>
       <td>
         <div class="cb-cell-name">${esc(material.name)}</div>
-        <div class="cb-cell-sub">${esc(material.category)}</div>
+        <div class="cb-cell-sub">${esc(categoryLabel(material.category))}</div>
       </td>
       <td>
         <span class="cb-cell-stock">${Number(material.stockQuantity) || 0}</span>

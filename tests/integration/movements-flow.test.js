@@ -423,6 +423,87 @@ describe('12. withdrawing more than is on hand', () => {
 // HISTORY IS PERMANENT
 // ============================================================
 
+// ============================================================
+// ROUND 2: CATEGORY, PROJECT AND KEYWORD FILTERS
+//
+// Type, material and dates are applied by the Firestore query; category,
+// project and keyword are checked in the browser while paging. These run
+// the real queries with the real rules, through loadMovements() and the
+// export's loadAllMovements().
+// ============================================================
+
+describe('history filters checked while paging', () => {
+  async function history() {
+    await signInAs('staff@example.com', 'production_staff');
+    await seed('materials/m2', {
+      name: { stringValue: 'Contact Cement' },
+      category: { stringValue: 'adhesives' },
+      unit: { stringValue: 'can' },
+      size: { stringValue: '' },
+      stockQuantity: { integerValue: '20' },
+      minThreshold: { integerValue: '2' },
+      notes: { stringValue: '' },
+      isArchived: { booleanValue: false },
+      lastAuditId: { stringValue: 'seed' },
+    });
+
+    const find = async (id) => (await materialsLib.loadCatalog()).materials.find((m) => m.id === id);
+
+    await movementsLib.logMovement({
+      type: 'out', material: await find('m1'), quantity: '2', reason: 'Project Usage', project: 'Sofa set for Ms. Reyes',
+    });
+    await movementsLib.logMovement({
+      type: 'out', material: await find('m2'), quantity: '1', reason: 'Project Usage', project: 'Dining table',
+    });
+    await movementsLib.logMovement({
+      type: 'in', material: await find('m2'), quantity: '5', reason: 'Purchase', notes: 'urgent restock',
+    });
+
+    await waitFor(async () => {
+      const all = await movementsLib.loadMovements({});
+      return all.movements.length === 3 ? all : null;
+    });
+  }
+
+  const names = (page) => page.movements.map((m) => m.project || m.reason).sort();
+
+  it('filters by category', async () => {
+    await history();
+    const page = await movementsLib.loadMovements({
+      match: movementsLib.movementMatcher({ materialIds: new Set(['m2']) }),
+    });
+    expect(names(page)).toEqual(['Dining table', 'Purchase']);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it('filters by the start of a project name, any case', async () => {
+    await history();
+    const page = await movementsLib.loadMovements({
+      match: movementsLib.movementMatcher({ project: 'SOFA' }),
+    });
+    expect(names(page)).toEqual(['Sofa set for Ms. Reyes']);
+  });
+
+  it('combines a browser-side filter with an indexed one', async () => {
+    await history();
+    const page = await movementsLib.loadMovements({
+      type: 'in',
+      match: movementsLib.movementMatcher({ keyword: 'urgent' }),
+    });
+    expect(names(page)).toEqual(['Purchase']);
+  });
+
+  it('exports every movement that matches, not only one page', async () => {
+    await history();
+    const { movements, truncated } = await movementsLib.loadAllMovements({
+      type: 'out',
+      match: movementsLib.movementMatcher({ materialIds: new Set(['m1', 'm2']) }),
+    });
+    expect(movements.map((m) => m.project).sort()).toEqual(['Dining table', 'Sofa set for Ms. Reyes']);
+    expect(truncated).toBe(false);
+  });
+});
+
 describe('movement history', () => {
   it('cannot be edited or deleted once written', async () => {
     const uid = await signInAs('gm@example.com', 'general_manager');

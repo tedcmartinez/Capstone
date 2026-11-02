@@ -11,6 +11,7 @@
 
 import { esc, render, pesoShort, alertHtml, friendlyError } from '../lib/dom.js';
 import { loadCatalog, categoryStats, lowStockOf } from '../lib/materials.js';
+import { categoryLabel } from '../lib/format.js';
 import { isManager } from '../lib/session.js';
 import { updateAlerts } from '../ui/shell.js';
 
@@ -89,7 +90,7 @@ function card(row, manager) {
         <div class="cb-card-body">
           <div class="d-flex justify-content-between align-items-start mb-3">
             <div>
-              <div class="cb-cell-name" style="font-size:15px;">${esc(row.category)}</div>
+              <div class="cb-cell-name" style="font-size:15px;">${esc(categoryLabel(row.category))}</div>
               <div class="cb-cell-sub">${row.itemCount} material${row.itemCount === 1 ? '' : 's'}</div>
             </div>
             <span class="cb-kpi-icon">

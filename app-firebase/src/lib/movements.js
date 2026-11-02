@@ -334,41 +334,180 @@ export async function adjustStock({ material, countedQuantity, reason, notes }) 
 //
 // Movement history grows for as long as the shop uses the system, so unlike
 // the materials catalog it is read a page at a time rather than all at once.
-// The filters are applied by Firestore, using the composite indexes in
-// firestore.indexes.json: equality filters first, then the date range on
-// movementDate, which is also the field the results are ordered by.
+//
+// Filters come in two kinds:
+//
+//   Indexed, applied by Firestore: type, material, and the date range on
+//   movementDate, using the composite indexes in firestore.indexes.json.
+//
+//   Checked in the browser while paging: category, project and keyword.
+//   A category is a property of the material, not of the movement; project
+//   matching has to read older stock-outs whose project sits in reference;
+//   and a keyword search across several fields is not something Firestore
+//   can index. Covering every combination with composite indexes would take
+//   dozens of them, so instead the page keeps reading in batches until it
+//   has a full page of matches. The number of movements read for one page
+//   is capped (SCAN_LIMIT), so a narrow search over a long history cannot
+//   spend the free plan's daily reads; when the cap is reached the page
+//   says so and Next continues from where the reading stopped.
 // ============================================================
 
-export async function loadMovements({ type, materialId, dateFrom, dateTo, cursor } = {}) {
+const SCAN_BATCH = 100;
+export const SCAN_LIMIT = 1000;
+
+// The browser-side filters, as one predicate. Returns null when there are
+// none, so the plain indexed query is used unchanged.
+//
+//   materialIds  a Set of the material ids in the chosen category
+//   project      matched as a prefix of the project's search key
+//   keyword      every word must appear in the material, reason, reference,
+//                project, notes or the name of who logged it
+export function movementMatcher({ materialIds = null, project = '', keyword = '' } = {}) {
+  const projectPrefix = projectKey(project);
+  const words = String(keyword || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  if (!materialIds && !projectPrefix && words.length === 0) return null;
+
+  return (movement) => {
+    if (materialIds && !materialIds.has(movement.materialId)) return false;
+    if (projectPrefix && !projectKey(projectOf(movement)).startsWith(projectPrefix)) return false;
+    if (words.length > 0) {
+      const haystack = [
+        movement.materialName,
+        reasonLabel(movement.reason || ''),
+        movement.reference,
+        projectOf(movement),
+        movement.notes,
+        movement.loggedByName,
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (!words.every((word) => haystack.includes(word))) return false;
+    }
+    return true;
+  };
+}
+
+function indexedQuery({ type, materialId, dateFrom, dateTo }, cursor, size) {
   const clauses = [];
 
-  if (type === 'in' || type === 'out') clauses.push(where('type', '==', type));
+  if (type === 'in' || type === 'out' || type === 'adjust') clauses.push(where('type', '==', type));
   if (materialId) clauses.push(where('materialId', '==', materialId));
   if (dateFrom) clauses.push(where('movementDate', '>=', dateFrom));
   if (dateTo) clauses.push(where('movementDate', '<=', dateTo));
 
   // Newest first, the order the PHP page used. createdAt breaks ties within
   // a day, so several movements on the same date keep a stable order.
-  const ordering = [orderBy('movementDate', 'desc'), orderBy('createdAt', 'desc')];
+  return query(
+    collection(db, 'stock_movements'),
+    ...clauses,
+    orderBy('movementDate', 'desc'),
+    orderBy('createdAt', 'desc'),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(size)
+  );
+}
 
-  // One extra row is requested so the caller can tell whether another page
-  // exists without running a separate count query.
-  const pageQuery = cursor
-    ? query(collection(db, 'stock_movements'), ...clauses, ...ordering, startAfter(cursor), limit(PAGE_SIZE + 1))
-    : query(collection(db, 'stock_movements'), ...clauses, ...ordering, limit(PAGE_SIZE + 1));
+// One page of movements.
+//
+// filters: { type, materialId, dateFrom, dateTo, cursor, match }
+// match is a predicate from movementMatcher(), or null.
+//
+// Returns { movements, hasMore, lastDoc, capped }. lastDoc is passed back
+// as cursor for the next page. capped is true when the page stopped
+// because SCAN_LIMIT movements had been read, not because it was full.
+export async function loadMovements({ cursor = null, match = null, ...filters } = {}) {
+  // With no browser-side filter one query does it: one extra row is asked
+  // for, so the caller can tell whether another page exists without a count
+  if (!match) {
+    const snapshot = await getDocs(indexedQuery(filters, cursor, PAGE_SIZE + 1));
+    const docs = snapshot.docs;
+    const hasMore = docs.length > PAGE_SIZE;
+    const pageDocs = hasMore ? docs.slice(0, PAGE_SIZE) : docs;
 
-  const snapshot = await getDocs(pageQuery);
-  const docs = snapshot.docs;
+    return {
+      movements: pageDocs.map((d) => ({ id: d.id, ...d.data() })),
+      hasMore,
+      lastDoc: pageDocs.length > 0 ? pageDocs[pageDocs.length - 1] : null,
+      capped: false,
+    };
+  }
 
-  const hasMore = docs.length > PAGE_SIZE;
-  const page = hasMore ? docs.slice(0, PAGE_SIZE) : docs;
+  const matched = [];
+  let scanned = 0;
+  let position = cursor;
 
+  while (scanned < SCAN_LIMIT) {
+    const snapshot = await getDocs(indexedQuery(filters, position, SCAN_BATCH));
+
+    for (const d of snapshot.docs) {
+      scanned += 1;
+      const movement = { id: d.id, ...d.data() };
+      if (match(movement)) {
+        matched.push({ movement, doc: d });
+        // One past a full page proves there is a next page
+        if (matched.length > PAGE_SIZE) {
+          const pageItems = matched.slice(0, PAGE_SIZE);
+          return {
+            movements: pageItems.map((item) => item.movement),
+            hasMore: true,
+            lastDoc: pageItems[pageItems.length - 1].doc,
+            capped: false,
+          };
+        }
+      }
+      position = d;
+    }
+
+    if (snapshot.docs.length < SCAN_BATCH) {
+      // The history has run out
+      return {
+        movements: matched.map((item) => item.movement),
+        hasMore: false,
+        lastDoc: matched.length > 0 ? matched[matched.length - 1].doc : null,
+        capped: false,
+      };
+    }
+  }
+
+  // Read as much as one page is allowed to. Next continues from the last
+  // movement read, matching or not.
   return {
-    movements: page.map((d) => ({ id: d.id, ...d.data() })),
-    hasMore,
-    // Passed back in to fetch the following page
-    lastDoc: page.length > 0 ? page[page.length - 1] : null,
+    movements: matched.map((item) => item.movement),
+    hasMore: true,
+    lastDoc: position,
+    capped: true,
   };
+}
+
+// Every movement matching the filters, for an export. Reads in large
+// batches and stops at a ceiling, like the audit trail's export, so one
+// click cannot spend the day's read allowance. Reaching the ceiling is
+// reported, never hidden.
+const EXPORT_BATCH = 500;
+export const MOVEMENT_EXPORT_CEILING = 10000;
+
+export async function loadAllMovements({ match = null, ...filters } = {}, { onProgress } = {}) {
+  const movements = [];
+  let read = 0;
+  let cursor = null;
+
+  while (read < MOVEMENT_EXPORT_CEILING) {
+    const snapshot = await getDocs(indexedQuery(filters, cursor, EXPORT_BATCH));
+
+    for (const d of snapshot.docs) {
+      read += 1;
+      const movement = { id: d.id, ...d.data() };
+      if (!match || match(movement)) movements.push(movement);
+    }
+
+    if (onProgress) onProgress(movements.length);
+
+    if (snapshot.docs.length < EXPORT_BATCH) return { movements, truncated: false };
+    cursor = snapshot.docs[snapshot.docs.length - 1];
+  }
+
+  return { movements, truncated: true };
 }
 
 // The most recent N movements, for the dashboard's recent activity list.
@@ -386,13 +525,15 @@ export async function loadRecentMovements(count = 8) {
 }
 
 // Every movement in a date range, for the movement report and the dashboard
-// chart. Ported from getFiltered() and getDailyTotals().
+// chart. Ported from getFiltered() and getDailyTotals(). Either end may be
+// left empty; both empty is the whole history, which only the movement
+// report's All time asks for.
 export async function loadMovementsInRange(dateFrom, dateTo) {
   const snapshot = await getDocs(
     query(
       collection(db, 'stock_movements'),
-      where('movementDate', '>=', dateFrom),
-      where('movementDate', '<=', dateTo),
+      ...(dateFrom ? [where('movementDate', '>=', dateFrom)] : []),
+      ...(dateTo ? [where('movementDate', '<=', dateTo)] : []),
       orderBy('movementDate', 'desc'),
       orderBy('createdAt', 'desc')
     )

@@ -563,3 +563,152 @@
     color: var(--cb-muted);
     font-size: 13px;
 }
+
+/* ============================================================
+   13. SORTABLE HEADERS
+   style.css drew a sortable heading as a button, which the
+   browser then gave a border and grey background, so those
+   columns looked boxed next to plain ones like DETAILS. These
+   rules make the button look exactly like the plain heading
+   text around it, with a small arrow. The focus ring shows for
+   keyboard focus only.
+   ============================================================ */
+
+.cb-table thead th .cb-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+}
+
+.cb-table thead th .cb-sort:hover,
+.cb-table thead th .cb-sort.is-active {
+    color: var(--cb-text);
+}
+
+.cb-table thead th .cb-sort:focus {
+    outline: none;
+}
+
+.cb-table thead th .cb-sort:focus-visible {
+    outline: 2px solid var(--cb-orange);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
+.cb-table thead th .cb-sort-arrow {
+    font-size: 8px;
+    opacity: 0.9;
+}
+
+.cb-table thead th .cb-sort-arrow.is-idle {
+    opacity: 0.3;
+    letter-spacing: -1px;
+}
+
+.cb-table thead th.cb-num .cb-sort {
+    justify-content: flex-end;
+}
+
+/* ============================================================
+   14. DATE RANGE FILTER
+   From and To on one row with the other filters, labelled,
+   with the five presets beside them.
+   ============================================================ */
+
+.cb-daterange {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px 10px;
+}
+
+.cb-daterange-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cb-daterange-label {
+    color: var(--cb-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.cb-daterange-field .cb-input {
+    width: 150px;
+}
+
+.cb-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cb-preset {
+    padding: 6px 10px;
+    border: 1px solid var(--cb-border);
+    border-radius: 999px;
+    background-color: var(--cb-surface);
+    color: var(--cb-muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.cb-preset:hover {
+    color: var(--cb-text);
+}
+
+.cb-preset.is-active {
+    border-color: var(--cb-orange);
+    background-color: var(--cb-orange);
+    color: #fff;
+}
+
+.cb-preset:focus-visible {
+    outline: 2px solid var(--cb-orange);
+    outline-offset: 2px;
+}
+
+.cb-daterange-error {
+    flex-basis: 100%;
+}
+
+/* Filter rows hold labelled fields now, so they line up along the bottom */
+.cb-filters {
+    align-items: flex-end;
+}
+
+/* ============================================================
+   15. MATERIALS TABLE
+   Most material names are long ("Marine Plywood 3/4 x 4 x 8
+   ft"), and wrapped onto three or four lines while Size and
+   Unit kept room they did not need. The name gets the room;
+   size and unit stay on one short line.
+   ============================================================ */
+
+.cb-materials-table .cb-col-name {
+    min-width: 260px;
+}
+
+.cb-materials-table td:nth-child(3),
+.cb-materials-table td:nth-child(4) {
+    white-space: nowrap;
+    width: 1%;
+}
+
+/* The movement filters: a narrower project box than the search */
+.cb-filter-project {
+    width: 180px;
+}

@@ -23,7 +23,9 @@ import {
   alertHtml,
   friendlyError,
 } from '../lib/dom.js';
-import { loadCatalog, lowStockOf } from '../lib/materials.js';
+import { loadCatalog, lowStockOf, categoriesOf } from '../lib/materials.js';
+import { categoryLabel } from '../lib/format.js';
+import { allQueryParams, setQuery } from '../lib/router.js';
 import { alertsConfigured, sendChecklist } from '../lib/alerts.js';
 import { auditedWrite } from '../lib/audit.js';
 import { updateAlerts } from '../ui/shell.js';
@@ -32,11 +34,13 @@ import { db } from '../lib/firebase.js';
 
 let container = null;
 let lowStock = [];
+let category = '';
 let activeUsers = [];
 let message = null;
 
 export async function renderChecklist(target) {
   container = target;
+  category = allQueryParams().category || '';
 
   render(container, `
     <div class="cb-page-head">
@@ -73,16 +77,24 @@ export async function renderChecklist(target) {
 const today = () =>
   new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
+// The category filter narrows the list on screen and on paper. The emailed
+// checklist is built by the alert service from every material that needs
+// reordering, so it always lists them all; the page says so.
+function shownMaterials() {
+  return category ? lowStock.filter((m) => m.category === category) : lowStock;
+}
+
 function draw() {
-  const count = lowStock.length;
+  const count = shownMaterials().length;
   const emailReady = alertsConfigured();
+  const scope = category ? ` in ${categoryLabel(category)}` : '';
 
   render(container, `
     <div class="cb-page-head">
       <div>
         <h1 class="cb-page-title">Reorder Checklist</h1>
         <p class="cb-page-sub">
-          ${count} material${count === 1 ? '' : 's'} at or below threshold as of ${esc(today())}
+          ${count} material${count === 1 ? '' : 's'}${esc(scope)} at or below threshold as of ${esc(today())}
         </p>
       </div>
       <div class="d-flex gap-2 d-print-none">
@@ -91,7 +103,7 @@ function draw() {
           Print
         </button>
         <button type="button" class="cb-btn cb-btn-primary" id="ckOpenSend"
-                ${count === 0 || !emailReady ? 'disabled' : ''}
+                ${lowStock.length === 0 || !emailReady ? 'disabled' : ''}
                 ${!emailReady ? 'title="Email is not set up yet"' : ''}>
           <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M.05 3.555A2 2 0 0 1 2 2h12a2 2 0 0 1 1.95 1.555L8 8.414zM0 4.697v7.104l5.803-3.558zM6.761 8.83l-6.57 4.027A2 2 0 0 0 2 14h12a2 2 0 0 0 1.808-1.144l-6.57-4.027L8 9.586zm3.436-.586L16 11.801V4.697z"/></svg>
           Send by Email
@@ -102,8 +114,25 @@ function draw() {
     <!-- Shown only on paper, where the page furniture is hidden -->
     <div class="d-none d-print-block mb-3">
       <h1 class="cb-page-title">Reorder Checklist</h1>
-      <p class="cb-page-sub">${count} material${count === 1 ? '' : 's'} as of ${esc(today())}</p>
+      <p class="cb-page-sub">${count} material${count === 1 ? '' : 's'}${esc(scope)} as of ${esc(today())}</p>
     </div>
+
+    <form class="cb-filters mb-3 d-print-none" id="ckFilters">
+      <select name="category" class="cb-select" aria-label="Category">
+        <option value="">All Categories</option>
+        ${categoriesOf(lowStock)
+          .map(
+            (c) =>
+              `<option value="${esc(c)}"${category === c ? ' selected' : ''}>${esc(categoryLabel(c))}</option>`
+          )
+          .join('')}
+      </select>
+      ${
+        category
+          ? '<span class="cb-help mb-0">Send by Email always sends the full checklist, every category.</span>'
+          : ''
+      }
+    </form>
 
     ${message ? `<div class="d-print-none">${alertHtml(message.kind, message.text)}</div>` : ''}
 
@@ -135,7 +164,13 @@ function emptyState() {
         <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
       </div>
       <div class="cb-empty-title">Nothing to reorder</div>
-      <p class="cb-empty-text">All materials are above their minimum threshold.</p>
+      <p class="cb-empty-text">
+        ${
+          category
+            ? `Every ${esc(categoryLabel(category))} material is above its minimum threshold.`
+            : 'All materials are above their minimum threshold.'
+        }
+      </p>
     </div>`;
 }
 
@@ -147,6 +182,7 @@ function table() {
           <tr>
             <th style="width:40px;" class="d-print-none"></th>
             <th>Material</th>
+            <th>Category</th>
             <th class="cb-num">Current Qty</th>
             <th>Unit</th>
             <th class="cb-num">Threshold</th>
@@ -155,7 +191,7 @@ function table() {
           </tr>
         </thead>
         <tbody>
-          ${lowStock.map(row).join('')}
+          ${shownMaterials().map(row).join('')}
         </tbody>
       </table>
     </div>`;
@@ -172,6 +208,7 @@ function row(material) {
         <input type="checkbox" class="form-check-input" aria-label="Mark ${esc(material.name)} as ordered">
       </td>
       <td class="cb-cell-name">${esc(material.name)}</td>
+      <td><span class="cb-chip">${esc(categoryLabel(material.category))}</span></td>
       <td class="cb-num"><span class="cb-cell-stock">${Number(material.stockQuantity) || 0}</span></td>
       <td class="text-muted">${esc(material.unit)}</td>
       <td class="cb-num text-muted">${Number(material.minThreshold) || 0}</td>
@@ -236,6 +273,12 @@ function sendModal() {
 
 function wire() {
   $('#ckPrint', container)?.addEventListener('click', () => window.print());
+
+  $('#ckFilters select[name="category"]', container)?.addEventListener('change', (event) => {
+    category = event.target.value;
+    setQuery({ category });
+    draw();
+  });
 
   $('#ckOpenSend', container)?.addEventListener('click', () => {
     $('#ckSendErrors', container).innerHTML = '';

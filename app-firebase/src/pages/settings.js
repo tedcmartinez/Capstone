@@ -236,6 +236,7 @@ function rolesCard() {
     ['View dashboard and reports', false, true, true],
     ['Approve, disable and re-enable accounts', false, true, true],
     ['Demote a manager to staff', false, true, true],
+    ['Delete a disabled account', false, true, true],
     ['Promote staff to manager', false, false, true],
     ['View and export the audit trail', false, true, true],
   ];
@@ -281,7 +282,8 @@ function rolesCard() {
         </div>
         <div class="cb-help px-3 pb-3 pt-2">
           Nobody can change their own role or status, and nobody can change
-          the webmaster's account.
+          or delete the webmaster's account. Only disabled accounts can be
+          deleted, and roles change only on active ones.
         </div>
       </div>
     </div>`;

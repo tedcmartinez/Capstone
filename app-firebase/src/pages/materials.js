@@ -20,6 +20,8 @@ import {
   alertHtml,
   friendlyError,
 } from '../lib/dom.js';
+import { categoryLabel } from '../lib/format.js';
+import { sortableTh } from '../ui/sort-header.js';
 import {
   loadCatalog,
   categoriesOf,
@@ -155,7 +157,7 @@ function filterBar(categories, hasFilters, manager) {
         ${categories
           .map(
             (category) =>
-              `<option value="${esc(category)}"${filters.category === category ? ' selected' : ''}>${esc(category)}</option>`
+              `<option value="${esc(category)}"${filters.category === category ? ' selected' : ''}>${esc(categoryLabel(category))}</option>`
           )
           .join('')}
       </select>
@@ -200,34 +202,27 @@ function emptyState(hasFilters) {
     </div>`;
 }
 
-// A sortable column header. Clicking the column already in use flips the
-// direction, which is what sortLink() did in the PHP view.
-function sortHeader(field, label) {
-  const active = filters.sort === field;
-  const arrow = active
-    ? `<span class="cb-sort-arrow">${filters.direction === 'asc' ? '&#9650;' : '&#9660;'}</span>`
-    : '';
-
-  return `
-    <button type="button" class="cb-sort${active ? ' is-active' : ''}" data-sort="${field}">
-      ${esc(label)}${arrow}
-    </button>`;
+// A sortable column header (ui/sort-header.js). Clicking the column
+// already in use flips the direction, which is what sortLink() did in the
+// PHP view.
+function sortHeader(field, label, className = '') {
+  return sortableTh({ field, label }, { field: filters.sort, direction: filters.direction }, { className });
 }
 
 function table(rows, manager) {
   return `
     <div class="cb-table-wrap">
-      <table class="cb-table">
+      <table class="cb-table cb-materials-table">
         <thead>
           <tr>
-            <th>${sortHeader('name', 'Name')}</th>
-            <th>${sortHeader('category', 'Category')}</th>
+            ${sortHeader('name', 'Name', 'cb-col-name')}
+            ${sortHeader('category', 'Category')}
             <th>Size</th>
             <th>Unit</th>
-            <th>${sortHeader('stock', 'Stock')}</th>
+            ${sortHeader('stock', 'Stock')}
             <th class="cb-num">Min Threshold</th>
-            ${manager ? `<th class="cb-num">${sortHeader('cost', 'Cost / Unit')}</th>` : ''}
-            ${manager ? `<th>${sortHeader('supplier', 'Supplier')}</th>` : ''}
+            ${manager ? sortHeader('cost', 'Cost / Unit', 'cb-num') : ''}
+            ${manager ? sortHeader('supplier', 'Supplier') : ''}
             <th class="cb-num">Actions</th>
           </tr>
         </thead>
@@ -247,8 +242,8 @@ export function row(material, manager) {
 
   return `
     <tr>
-      <td><div class="cb-cell-name">${esc(material.name)}</div></td>
-      <td><span class="cb-chip">${esc(material.category)}</span></td>
+      <td class="cb-col-name"><div class="cb-cell-name">${esc(material.name)}</div></td>
+      <td><span class="cb-chip">${esc(categoryLabel(material.category))}</span></td>
       <td class="text-muted">${esc(material.size) || '-'}</td>
       <td class="text-muted">${esc(material.unit)}</td>
       <td>

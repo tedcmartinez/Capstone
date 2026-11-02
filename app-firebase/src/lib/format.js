@@ -22,3 +22,10 @@ export function signedCount(value, sign) {
   if (amount === 0) return '0';
   return `${sign}${amount.toLocaleString('en-PH')}`;
 }
+
+// A change that may go either way: "+5", "-3", or "0", never "+0" or "-0"
+export function signedNet(value) {
+  const amount = Number(value) || 0;
+  if (amount === 0) return '0';
+  return `${amount > 0 ? '+' : '-'}${Math.abs(amount).toLocaleString('en-PH')}`;
+}

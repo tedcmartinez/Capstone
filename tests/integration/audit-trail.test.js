@@ -193,6 +193,39 @@ describe('what each entry records', () => {
 // FILTERING
 // ============================================================
 
+// ============================================================
+// ROUND 2: CATEGORY AND DATES IN PHILIPPINE TIME
+// ============================================================
+
+describe('filtering the trail by category and day', () => {
+  it('filters by a category, as the list of its materials', async () => {
+    await buildHistory();
+
+    // Both seeded materials are in "wood"
+    const both = await trail.loadAuditPage({ materialIds: ['m1', 'm2'] });
+    expect(new Set(both.entries.map((e) => e.materialId))).toEqual(new Set(['m1', 'm2']));
+
+    const one = await trail.loadAuditPage({ materialIds: ['m2'] });
+    expect(one.entries.length).toBeGreaterThan(0);
+    expect(one.entries.every((e) => e.materialId === 'm2')).toBe(true);
+  });
+
+  it('finds nothing for a category with no materials, without asking Firestore', async () => {
+    await buildHistory();
+    const page = await trail.loadAuditPage({ materialIds: [] });
+    expect(page.entries).toEqual([]);
+  });
+
+  it('includes everything up to the end of the To day in Philippine time', async () => {
+    await buildHistory();
+    const { shopToday } = await import('../../app-firebase/src/lib/dates.js');
+    const today = shopToday();
+
+    const page = await trail.loadAuditPage({ dateFrom: today, dateTo: today });
+    expect(page.entries.length).toBeGreaterThan(0);
+  });
+});
+
 describe('filtering the trail', () => {
   it('lists newest first', async () => {
     await buildHistory();

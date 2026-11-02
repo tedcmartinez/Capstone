@@ -21,6 +21,7 @@ import {
 import { db } from './firebase.js';
 import { PAGE_SIZE, ROLE_LABELS } from './config.js';
 import { toDate } from './dom.js';
+import { startOfShopDay, endOfShopDay } from './dates.js';
 
 // ============================================================
 // ACTIONS
@@ -57,6 +58,8 @@ export const AUDIT_ACTION_GROUPS = [
       'user.reject': 'Registration rejected',
       'user.role_change': 'Role changed',
       'user.disable': 'Account disabled',
+      'user.delete': 'Account deleted',
+      'user.verify_email': 'Email verified',
       'auth.login': 'Signed in',
       'auth.logout': 'Signed out',
     },
@@ -66,6 +69,7 @@ export const AUDIT_ACTION_GROUPS = [
     actions: {
       'checklist.send': 'Reorder checklist sent',
       'audit.export': 'Audit trail exported',
+      'movements.export': 'Movement history exported',
       'data.migrate': 'Data migrated',
     },
   },
@@ -94,36 +98,60 @@ export function isKnownAction(action) {
 // own composite index in firestore.indexes.json.
 // ============================================================
 
-function clausesFor({ actorUid, action, materialId, dateFrom, dateTo }) {
+// A category is a set of materials, so it is filtered with "in" on
+// materialId, which uses the same indexes as a single material. Firestore
+// allows at most 30 values in one "in"; a category larger than that is
+// checked in the browser instead (see loadAuditPage).
+export const IN_LIMIT = 30;
+
+function clausesFor({ actorUid, action, materialId, materialIds, dateFrom, dateTo }) {
   const clauses = [];
 
   if (actorUid) clauses.push(where('actorUid', '==', actorUid));
   if (action) clauses.push(where('action', '==', action));
-  if (materialId) clauses.push(where('materialId', '==', materialId));
+  if (materialId) {
+    clauses.push(where('materialId', '==', materialId));
+  } else if (materialIds && materialIds.length > 0 && materialIds.length <= IN_LIMIT) {
+    clauses.push(where('materialId', 'in', materialIds));
+  }
 
-  // A date range covers whole days in the shop's own timezone. "To" is the
-  // start of the following day, exclusive, so a range ending on the 31st
-  // includes everything that happened on the 31st.
-  if (dateFrom) clauses.push(where('timestamp', '>=', Timestamp.fromDate(startOfDay(dateFrom))));
-  if (dateTo) clauses.push(where('timestamp', '<', Timestamp.fromDate(startOfNextDay(dateTo))));
+  // Whole days in the shop's own time: From is midnight Philippine time,
+  // and To runs to 11:59:59 PM on its day, whatever timezone the computer
+  // reading the trail is set to.
+  if (dateFrom) clauses.push(where('timestamp', '>=', Timestamp.fromDate(startOfShopDay(dateFrom))));
+  if (dateTo) clauses.push(where('timestamp', '<=', Timestamp.fromDate(endOfShopDay(dateTo))));
 
   return clauses;
 }
 
+// A YYYY-MM-DD date as a Date at local midnight, for the export title
 function startOfDay(iso) {
   const [year, month, day] = iso.split('-').map(Number);
   return new Date(year, month - 1, day, 0, 0, 0, 0);
 }
 
-function startOfNextDay(iso) {
-  const date = startOfDay(iso);
-  date.setDate(date.getDate() + 1);
-  return date;
+// The part of a category filter Firestore could not take, as a check on
+// each entry, or null when the query covers everything
+function browserCheck({ materialId, materialIds }) {
+  if (materialId || !materialIds || materialIds.length <= IN_LIMIT) return null;
+  const wanted = new Set(materialIds);
+  return (entry) => wanted.has(entry.materialId);
+}
+
+// A category with no materials matches nothing, and an empty "in" is an
+// error in Firestore, so that case never reaches a query
+function matchesNothing({ materialId, materialIds }) {
+  return !materialId && Array.isArray(materialIds) && materialIds.length === 0;
 }
 
 // One page of the trail, newest first. One extra entry is requested so the
 // caller can tell whether another page exists without a separate count.
 export async function loadAuditPage(filters = {}, cursor = null) {
+  if (matchesNothing(filters)) return { entries: [], hasMore: false, lastDoc: null };
+
+  const check = browserCheck(filters);
+  if (check) return scanAuditPage(filters, cursor, check);
+
   const parts = [
     ...clausesFor(filters),
     orderBy('timestamp', 'desc'),
@@ -144,6 +172,49 @@ export async function loadAuditPage(filters = {}, cursor = null) {
   };
 }
 
+// A page for a category too large for "in": reads in batches, keeps the
+// entries about its materials, and stops at a full page or after 1,000
+// entries read, whichever comes first, so the free read allowance is safe.
+async function scanAuditPage(filters, cursor, check) {
+  const kept = [];
+  let position = cursor;
+  let read = 0;
+
+  while (read < 1000) {
+    const snapshot = await getDocs(
+      query(
+        collection(db, 'audit_logs'),
+        ...clausesFor(filters),
+        orderBy('timestamp', 'desc'),
+        ...(position ? [startAfter(position)] : []),
+        limit(100)
+      )
+    );
+
+    for (const d of snapshot.docs) {
+      read += 1;
+      position = d;
+      const entry = { id: d.id, ...d.data() };
+      if (!check(entry)) continue;
+      kept.push({ entry, doc: d });
+      if (kept.length > PAGE_SIZE) {
+        const pageItems = kept.slice(0, PAGE_SIZE);
+        return {
+          entries: pageItems.map((item) => item.entry),
+          hasMore: true,
+          lastDoc: pageItems[pageItems.length - 1].doc,
+        };
+      }
+    }
+
+    if (snapshot.docs.length < 100) {
+      return { entries: kept.map((item) => item.entry), hasMore: false, lastDoc: position };
+    }
+  }
+
+  return { entries: kept.map((item) => item.entry), hasMore: true, lastDoc: position };
+}
+
 // Every entry matching the filters, for an export.
 //
 // The export has to contain all of the filtered rows, not only the page on
@@ -156,6 +227,9 @@ const EXPORT_BATCH = 500;
 export const EXPORT_CEILING = 10000;
 
 export async function loadAllAudit(filters = {}, { onProgress } = {}) {
+  if (matchesNothing(filters)) return { entries: [], truncated: false };
+
+  const check = browserCheck(filters) || (() => true);
   const entries = [];
   let cursor = null;
 
@@ -168,7 +242,10 @@ export async function loadAllAudit(filters = {}, { onProgress } = {}) {
     ];
 
     const snapshot = await getDocs(query(collection(db, 'audit_logs'), ...parts));
-    for (const d of snapshot.docs) entries.push({ id: d.id, ...d.data() });
+    for (const d of snapshot.docs) {
+      const entry = { id: d.id, ...d.data() };
+      if (check(entry)) entries.push(entry);
+    }
 
     if (onProgress) onProgress(entries.length);
 
@@ -405,6 +482,7 @@ export function describeFilters(filters, { users = [], materials = [] } = {}) {
     described.user = user ? `${user.name} (${user.email})` : filters.actorUid;
   }
   if (filters.action) described.action = actionLabel(filters.action);
+  if (filters.category) described.category = filters.categoryLabel || filters.category;
   if (filters.materialId) {
     const material = materials.find((m) => m.id === filters.materialId);
     described.material = material ? material.name : filters.materialId;

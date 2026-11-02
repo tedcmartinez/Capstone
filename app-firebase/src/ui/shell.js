@@ -91,9 +91,11 @@ function activeClass(current, path, extraPrefixes = []) {
   return '';
 }
 
-function navLink(current, { href, label, iconKey, extra = [], badge = null }) {
+function navLink(current, { href, label, iconKey, extra = [], badge = null, badgeTitle = '' }) {
   const badgeHtml =
-    badge && badge > 0 ? `<span class="cb-nav-count is-alert">${badge}</span>` : '';
+    badge && badge > 0
+      ? `<span class="cb-nav-count is-alert"${badgeTitle ? ` title="${esc(badgeTitle)}" aria-label="${esc(badgeTitle)}"` : ''}>${badge}</span>`
+      : '';
   return `
     <a class="cb-nav-link${activeClass(current, href, extra)}" href="${href}">
       ${icon(iconKey)}
@@ -102,8 +104,19 @@ function navLink(current, { href, label, iconKey, extra = [], badge = null }) {
     </a>`;
 }
 
-function sidebar(current, alertCount) {
+// The Low Stock Report badge counts low and out-of-stock materials
+// together, while the dashboard's Low Stock card counts only the low ones,
+// so the badge's tooltip spells out the split: "16 need reordering: 12 low,
+// 4 out of stock".
+export function reorderBadgeTitle(lowStock) {
+  const out = lowStock.filter((m) => (Number(m.stockQuantity) || 0) === 0).length;
+  const low = lowStock.length - out;
+  return `${lowStock.length} need reordering: ${low} low, ${out} out of stock`;
+}
+
+function sidebar(current, lowStock) {
   const manager = isManager();
+  const alertCount = lowStock.length;
 
   return `
     <aside class="cb-sidebar d-print-none" id="cbSidebar">
@@ -143,6 +156,7 @@ function sidebar(current, alertCount) {
           label: 'Low Stock Report',
           iconKey: 'warning',
           badge: alertCount,
+          badgeTitle: reorderBadgeTitle(lowStock),
         })}
         ${navLink(current, { href: '/checklist', label: 'Reorder Checklist', iconKey: 'checklist' })}
 
@@ -364,7 +378,7 @@ export function mountShell({ lowStock = [] } = {}) {
   if (!mounted || !document.getElementById('cbSidebar')) {
     root.innerHTML = `
       <div class="cb-layout">
-        ${sidebar(current, lowStock.length)}
+        ${sidebar(current, lowStock)}
         <div class="cb-main">
           ${topbar(lowStock)}
           <div id="cbSyncBanner"></div>
@@ -403,7 +417,7 @@ export function updateAlerts(lowStock) {
   // The backdrop sits immediately after the sidebar and is replaced with it,
   // so it is removed first to avoid leaving a duplicate behind.
   document.getElementById('cbBackdrop')?.remove();
-  sidebarEl.outerHTML = sidebar(current, lowStock.length);
+  sidebarEl.outerHTML = sidebar(current, lowStock);
   rightEl.outerHTML = topbarRight(lowStock);
 
   wireShell();

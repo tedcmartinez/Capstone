@@ -28,27 +28,30 @@ import {
   loadAuditFilterOptions,
   diffRows,
   exportRows,
-  exportTitle,
   exportFileName,
   toCsv,
   describeFilters,
   EXPORT_HEADER,
   EXPORT_CEILING,
 } from '../lib/auditTrail.js';
-import {
-  canExportToSheets,
-  exportToSheets,
-  downloadCsv,
-  SheetsDeclined,
-  SheetsNotEnabled,
-} from '../lib/sheets.js';
+import { downloadCsv } from '../lib/sheets.js';
 import { auditedWrite } from '../lib/audit.js';
 import { allQueryParams } from '../lib/router.js';
 import { ROLE_LABELS, PAGE_SIZE } from '../lib/config.js';
+import { categoriesOf } from '../lib/materials.js';
+import { categoryLabel } from '../lib/format.js';
+import { countHeading } from '../lib/dates.js';
+import { dateRangeHtml, wireDateRange } from '../ui/date-range.js';
+
+// The Google Sheets export moved to Movement History, which is the record a
+// manager actually works from in a spreadsheet. The trail keeps its CSV
+// download, which follows the filters on screen.
+
+const NO_FILTERS = { dateFrom: '', dateTo: '', actorUid: '', action: '', category: '', materialId: '' };
 
 let container = null;
 let options = { users: [], materials: [] };
-let filters = { dateFrom: '', dateTo: '', actorUid: '', action: '', materialId: '' };
+let filters = { ...NO_FILTERS };
 let page = { entries: [], hasMore: false, lastDoc: null };
 let cursors = [];
 let pageIndex = 0;
@@ -63,6 +66,7 @@ export async function renderAudit(target) {
     dateTo: params.to || '',
     actorUid: params.user || '',
     action: isKnownAction(params.action) ? params.action : '',
+    category: params.category || '',
     materialId: params.material || '',
   };
 
@@ -78,7 +82,8 @@ export async function renderAudit(target) {
     </div>`);
 
   try {
-    [options, page] = await Promise.all([loadAuditFilterOptions(), loadAuditPage(filters)]);
+    options = await loadAuditFilterOptions();
+    page = await loadAuditPage(queryFilters());
   } catch (error) {
     render(container, `
       <div class="cb-page-head"><div><h1 class="cb-page-title">Audit Trail</h1></div></div>
@@ -94,31 +99,36 @@ export async function renderAudit(target) {
 // ============================================================
 
 function hasFilters() {
-  return Boolean(
-    filters.dateFrom || filters.dateTo || filters.actorUid || filters.action || filters.materialId
-  );
+  return Object.keys(NO_FILTERS).some((key) => filters[key]);
+}
+
+// The filters as the query takes them. A category becomes the list of its
+// materials, archived ones included, since their history is still here.
+function queryFilters() {
+  const materialIds = filters.category
+    ? options.materials.filter((m) => m.category === filters.category).map((m) => m.id)
+    : null;
+  return {
+    ...filters,
+    materialIds,
+    categoryLabel: filters.category ? categoryLabel(filters.category) : '',
+  };
 }
 
 function draw() {
-  const sheetsAvailable = canExportToSheets();
+  const count = countHeading(page.entries.length, 'entry', filters.dateFrom, filters.dateTo);
+  const paged = pageIndex > 0 || page.hasMore ? ` (page ${pageIndex + 1})` : '';
 
   render(container, `
     <div class="cb-page-head">
       <div>
         <h1 class="cb-page-title">Audit Trail</h1>
         <p class="cb-page-sub">
-          Every change recorded in the system, newest first. Entries cannot be
-          edited or deleted by anyone.
+          ${esc(count + paged)}. Every change recorded in the system, newest
+          first; entries cannot be edited or deleted by anyone.
         </p>
       </div>
       <div class="d-flex gap-2 flex-wrap">
-        ${
-          sheetsAvailable
-            ? `<button type="button" class="cb-btn cb-btn-primary" id="auExportSheets">
-                 Export to Google Sheets
-               </button>`
-            : ''
-        }
         <button type="button" class="cb-btn cb-btn-outline" id="auExportCsv">
           Download CSV
         </button>
@@ -166,6 +176,7 @@ function filterBar() {
   ).join('');
 
   const materialOptions = options.materials
+    .filter((material) => !filters.category || material.category === filters.category)
     .map(
       (material) =>
         `<option value="${esc(material.id)}"${filters.materialId === material.id ? ' selected' : ''}>
@@ -176,25 +187,32 @@ function filterBar() {
 
   return `
     <form class="cb-filters mb-3" id="auFilters">
-      <input type="date" name="from" class="cb-input" value="${esc(filters.dateFrom)}"
-             aria-label="From date" title="From date">
-      <input type="date" name="to" class="cb-input" value="${esc(filters.dateTo)}"
-             aria-label="To date" title="To date">
-
-      <select name="user" class="cb-select">
+      <select name="user" class="cb-select" aria-label="User">
         <option value="">All Users</option>
         ${userOptions}
       </select>
 
-      <select name="action" class="cb-select">
+      <select name="action" class="cb-select" aria-label="Action">
         <option value="">All Actions</option>
         ${actionOptions}
       </select>
 
-      <select name="material" class="cb-select">
+      <select name="category" class="cb-select" aria-label="Category">
+        <option value="">All Categories</option>
+        ${categoriesOf(options.materials)
+          .map(
+            (category) =>
+              `<option value="${esc(category)}"${filters.category === category ? ' selected' : ''}>${esc(categoryLabel(category))}</option>`
+          )
+          .join('')}
+      </select>
+
+      <select name="material" class="cb-select" aria-label="Material">
         <option value="">All Materials</option>
         ${materialOptions}
       </select>
+
+      ${dateRangeHtml({ from: filters.dateFrom, to: filters.dateTo, idPrefix: 'au' })}
 
       ${hasFilters() ? '<button type="button" class="cb-btn cb-btn-outline" id="auClear">Clear</button>' : ''}
     </form>`;
@@ -241,7 +259,14 @@ function table() {
 // can be told apart at a glance
 function actionBadgeClass(action = '') {
   if (action.startsWith('stock.')) return 'is-brand';
-  if (action.endsWith('.archive') || action === 'user.disable' || action === 'user.reject') return 'is-out';
+  if (
+    action.endsWith('.archive') ||
+    action === 'user.disable' ||
+    action === 'user.reject' ||
+    action === 'user.delete'
+  ) {
+    return 'is-out';
+  }
   if (action.startsWith('auth.')) return 'is-neutral';
   return 'is-healthy';
 }
@@ -376,35 +401,6 @@ function showDetail(entryId) {
 function noticeHtml() {
   if (!notice) return '';
 
-  if (notice.kind === 'sheets-done') {
-    return `
-      <div class="cb-alert is-success">
-        <div>
-          <strong>${notice.rowCount.toLocaleString('en-PH')} entries exported to Google Sheets.</strong>
-          ${notice.truncated ? `<br>The export stopped at ${EXPORT_CEILING.toLocaleString('en-PH')} entries. Narrow the dates to export the rest.` : ''}
-          <div class="mt-2">
-            <a class="cb-btn cb-btn-primary cb-btn-sm" href="${esc(notice.url)}" target="_blank" rel="noopener">
-              Open in Sheets
-            </a>
-          </div>
-        </div>
-      </div>`;
-  }
-
-  if (notice.kind === 'offer-csv') {
-    return `
-      <div class="cb-alert is-info">
-        <div>
-          ${esc(notice.text)}
-          <div class="mt-2">
-            <button type="button" class="cb-btn cb-btn-outline cb-btn-sm" id="auOfferCsv">
-              Download CSV instead
-            </button>
-          </div>
-        </div>
-      </div>`;
-  }
-
   return alertHtml(notice.kind, notice.text);
 }
 
@@ -412,23 +408,22 @@ function showNotice(next) {
   notice = next;
   const target = $('#auNotice', container);
   if (target) target.innerHTML = noticeHtml();
-  $('#auOfferCsv', container)?.addEventListener('click', () => runExport('csv'));
 }
 
 function setExportButtonsBusy(busy) {
-  $$('#auExportSheets, #auExportCsv', container).forEach((button) => {
+  $$('#auExportCsv', container).forEach((button) => {
     button.disabled = busy;
   });
 }
 
-async function runExport(destination) {
+async function runExport() {
   setExportButtonsBusy(true);
   showNotice({ kind: 'info', text: 'Reading the audit trail...' });
 
   // Every matching entry, not only the page on screen
   let result;
   try {
-    result = await loadAllAudit(filters, {
+    result = await loadAllAudit(queryFilters(), {
       onProgress: (count) =>
         showNotice({ kind: 'info', text: `Reading the audit trail... ${count.toLocaleString('en-PH')} entries so far.` }),
     });
@@ -447,39 +442,6 @@ async function runExport(destination) {
   }
 
   const rows = [EXPORT_HEADER, ...exportRows(entries)];
-
-  if (destination === 'sheets') {
-    showNotice({ kind: 'info', text: 'Waiting for Google. A window will ask to let the system create the spreadsheet in your Drive.' });
-
-    try {
-      const sheet = await exportToSheets({ title: exportTitle(filters), rows });
-
-      await recordExport({
-        destination: 'Google Sheets',
-        rowCount: entries.length,
-        truncated,
-        spreadsheetId: sheet.spreadsheetId,
-      });
-
-      showNotice({
-        kind: 'sheets-done',
-        url: sheet.spreadsheetUrl,
-        rowCount: entries.length,
-        truncated,
-      });
-    } catch (error) {
-      if (error instanceof SheetsDeclined || error instanceof SheetsNotEnabled) {
-        // Not a fault the manager caused. The same rows are on offer as a
-        // file instead, which is acceptance test 16.
-        showNotice({ kind: 'offer-csv', text: error.message });
-      } else {
-        showNotice({ kind: 'danger', text: friendlyError(error) });
-      }
-    }
-
-    setExportButtonsBusy(false);
-    return;
-  }
 
   // CSV
   downloadCsv(exportFileName(filters), toCsv(rows));
@@ -509,7 +471,7 @@ async function runExport(destination) {
 // The export is itself recorded, with which slice of the trail it covered,
 // so the trail shows who took a copy of it and when
 async function recordExport({ destination, rowCount, truncated, spreadsheetId = null }) {
-  const described = describeFilters(filters, options);
+  const described = describeFilters(queryFilters(), options);
 
   await auditedWrite([], {
     action: 'audit.export',
@@ -537,25 +499,39 @@ function wire() {
   const form = $('#auFilters', container);
   form?.addEventListener('submit', (event) => event.preventDefault());
 
-  $$('select, input', form).forEach((control) => {
+  $$('select', form).forEach((control) => {
     control.addEventListener('change', () => {
       const field = {
-        from: 'dateFrom',
-        to: 'dateTo',
         user: 'actorUid',
         action: 'action',
+        category: 'category',
         material: 'materialId',
       }[control.name];
 
       filters[field] = control.value;
+
+      // A material outside the newly chosen category no longer applies
+      if (field === 'category' && filters.materialId) {
+        const material = options.materials.find((m) => m.id === filters.materialId);
+        if (filters.category && material?.category !== filters.category) filters.materialId = '';
+      }
+
       notice = null;
       syncUrl();
       reload();
     });
   });
 
+  wireDateRange(container, ({ from, to }) => {
+    filters.dateFrom = from;
+    filters.dateTo = to;
+    notice = null;
+    syncUrl();
+    reload();
+  });
+
   $('#auClear', container)?.addEventListener('click', () => {
-    filters = { dateFrom: '', dateTo: '', actorUid: '', action: '', materialId: '' };
+    filters = { ...NO_FILTERS };
     notice = null;
     syncUrl();
     reload();
@@ -568,9 +544,7 @@ function wire() {
   $('#auNext', container)?.addEventListener('click', () => goToPage(pageIndex + 1));
   $('#auPrev', container)?.addEventListener('click', () => goToPage(pageIndex - 1));
 
-  $('#auExportSheets', container)?.addEventListener('click', () => runExport('sheets'));
-  $('#auExportCsv', container)?.addEventListener('click', () => runExport('csv'));
-  $('#auOfferCsv', container)?.addEventListener('click', () => runExport('csv'));
+  $('#auExportCsv', container)?.addEventListener('click', () => runExport());
 }
 
 // The URL is updated without re-running the route, since the page is about
@@ -582,6 +556,7 @@ function syncUrl() {
   if (filters.dateTo) params.set('to', filters.dateTo);
   if (filters.actorUid) params.set('user', filters.actorUid);
   if (filters.action) params.set('action', filters.action);
+  if (filters.category) params.set('category', filters.category);
   if (filters.materialId) params.set('material', filters.materialId);
 
   const query = params.toString();
@@ -593,7 +568,7 @@ async function reload() {
   pageIndex = 0;
 
   try {
-    page = await loadAuditPage(filters);
+    page = await loadAuditPage(queryFilters());
   } catch (error) {
     notice = { kind: 'danger', text: friendlyError(error) };
     page = { entries: [], hasMore: false, lastDoc: null };
@@ -608,12 +583,12 @@ async function goToPage(target) {
   try {
     if (target > pageIndex) {
       cursors[pageIndex] = page.lastDoc;
-      page = await loadAuditPage(filters, page.lastDoc);
+      page = await loadAuditPage(queryFilters(), page.lastDoc);
     } else {
       // Firestore pages forward only, so going back starts from the cursor
       // that was kept on the way forward
       const cursor = target === 0 ? null : cursors[target - 1];
-      page = await loadAuditPage(filters, cursor);
+      page = await loadAuditPage(queryFilters(), cursor);
     }
     pageIndex = target;
   } catch (error) {

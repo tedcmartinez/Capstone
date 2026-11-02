@@ -35,11 +35,16 @@ import {
 import {
   loadMovementsInRange,
   movementTotals,
+  movementMatcher,
   reasonLabel,
   movementTypeLabel,
+  projectOf,
 } from '../lib/movements.js';
 import { allQueryParams, setQuery } from '../lib/router.js';
 import { updateAlerts } from '../ui/shell.js';
+import { categoryLabel, signedCount, signedNet } from '../lib/format.js';
+import { countHeading, describeRange } from '../lib/dates.js';
+import { dateRangeHtml, wireDateRange } from '../ui/date-range.js';
 
 export const renderInventoryReport = (container) => renderReport(container, 'inventory');
 export const renderLowStockReport = (container) => renderReport(container, 'lowstock');
@@ -165,12 +170,7 @@ function drawInventory() {
     ${tabs('inventory')}
 
     <form class="cb-filters mb-3 d-print-none" id="cbReportFilters">
-      <select name="category" class="cb-select">
-        <option value="">All Categories</option>
-        ${categoriesOf(catalog.materials)
-          .map((c) => `<option value="${esc(c)}"${filters.category === c ? ' selected' : ''}>${esc(c)}</option>`)
-          .join('')}
-      </select>
+      ${categorySelect(filters.category)}
 
       <select name="status" class="cb-select">
         <option value="">All Stock Status</option>
@@ -235,7 +235,7 @@ function inventoryRow(material) {
   return `
     <tr>
       <td class="cb-cell-name">${esc(material.name)}</td>
-      <td><span class="cb-chip">${esc(material.category)}</span></td>
+      <td><span class="cb-chip">${esc(categoryLabel(material.category))}</span></td>
       <td class="text-muted">${esc(material.size) || '-'}</td>
       <td class="cb-num">
         <span class="cb-cell-stock">${stock}</span>
@@ -254,7 +254,8 @@ function inventoryRow(material) {
 // ============================================================
 
 function drawLowStock() {
-  const materials = lowStockOf(catalog.materials);
+  const category = allQueryParams().category || '';
+  const materials = lowStockOf(inCategory(catalog.materials, category));
   const outCount = materials.filter((m) => Number(m.stockQuantity) === 0).length;
   const lowCount = materials.length - outCount;
 
@@ -265,6 +266,10 @@ function drawLowStock() {
       '<a href="/checklist" class="cb-btn cb-btn-primary">Send Reorder Checklist</a>'
     )}
     ${tabs('lowstock')}
+
+    <form class="cb-filters mb-3 d-print-none" id="cbReportFilters">
+      ${categorySelect(category)}
+    </form>
 
     <div class="row g-3 mb-3">
       <div class="col-6">
@@ -287,7 +292,12 @@ function drawLowStock() {
       <div class="cb-card-body is-flush">
         ${
           materials.length === 0
-            ? emptyReport('Nothing to reorder', 'Every material is above its minimum threshold.')
+            ? emptyReport(
+                'Nothing to reorder',
+                category
+                  ? `Every ${categoryLabel(category)} material is above its minimum threshold.`
+                  : 'Every material is above its minimum threshold.'
+              )
             : `
         <div class="cb-table-wrap">
           <table class="cb-table">
@@ -313,6 +323,7 @@ function drawLowStock() {
   `);
 
   wireCommon();
+  wireReportFilters(['category']);
 }
 
 function lowStockRow(material) {
@@ -326,7 +337,7 @@ function lowStockRow(material) {
   return `
     <tr>
       <td class="cb-cell-name">${esc(material.name)}</td>
-      <td><span class="cb-chip">${esc(material.category)}</span></td>
+      <td><span class="cb-chip">${esc(categoryLabel(material.category))}</span></td>
       <td class="cb-num">
         <span class="cb-cell-stock">${stock}</span>
         <span class="text-muted">${esc(material.unit)}</span>
@@ -359,13 +370,20 @@ function lowStockRow(material) {
 async function drawMovement() {
   const params = allQueryParams();
 
-  const dateFrom = params.from || defaultFrom();
-  const dateTo = params.to || todayIso();
+  // All time is asked for explicitly, since an address with no dates at all
+  // means the default thirty days
+  const allTime = params.range === 'all';
+  const dateFrom = allTime ? '' : params.from || defaultFrom();
+  const dateTo = allTime ? '' : params.to || todayIso();
   const type = ['in', 'out', 'adjust'].includes(params.type) ? params.type : '';
+  const category = params.category || '';
   const materialId = params.material || '';
+  const keyword = params.q || '';
+
+  const rangeText = describeRange(dateFrom, dateTo) || 'all time';
 
   render(container, `
-    ${pageHead('Stock Movement Report', `${shortDate(dateFrom)} to ${shortDate(dateTo)}`)}
+    ${pageHead('Stock Movement Report', `Movements ${rangeText}`)}
     ${tabs('movement')}
     <div class="cb-card"><div class="cb-card-body"><p class="cb-help mb-0">Loading movements...</p></div></div>`);
 
@@ -374,60 +392,74 @@ async function drawMovement() {
     movements = await loadMovementsInRange(dateFrom, dateTo);
   } catch (error) {
     render(container, `
-      ${pageHead('Stock Movement Report', `${shortDate(dateFrom)} to ${shortDate(dateTo)}`)}
+      ${pageHead('Stock Movement Report', `Movements ${rangeText}`)}
       ${tabs('movement')}
       ${alertHtml('danger', friendlyError(error))}`);
     wireCommon();
     return;
   }
 
-  // Type and material are filtered here rather than in the query, so that
-  // changing either does not cost another read of the same range
+  // Type, category, material and the search are applied here rather than
+  // in the query, so changing one does not cost another read of the range.
+  // The search covers material, reason, reference, project, notes and who
+  // logged it, using the same matching as Movement History.
+  const inCategoryIds = category
+    ? new Set(catalog.materials.filter((m) => m.category === category).map((m) => m.id))
+    : null;
+  const match = movementMatcher({ materialIds: materialId ? null : inCategoryIds, keyword });
+
   if (type) movements = movements.filter((m) => m.type === type);
   if (materialId) movements = movements.filter((m) => m.materialId === materialId);
+  if (match) movements = movements.filter(match);
 
   const totals = movementTotals(movements);
+  const materialChoices = category
+    ? catalog.materials.filter((m) => m.category === category)
+    : catalog.materials;
 
   render(container, `
-    ${pageHead('Stock Movement Report', `${shortDate(dateFrom)} to ${shortDate(dateTo)}`)}
+    ${pageHead('Stock Movement Report', countHeading(movements.length, 'movement', dateFrom, dateTo))}
     ${tabs('movement')}
 
     <form class="cb-filters mb-3 d-print-none" id="cbReportFilters">
-      <input type="date" name="from" class="cb-input" value="${esc(dateFrom)}" aria-label="From date">
-      <input type="date" name="to" class="cb-input" value="${esc(dateTo)}" aria-label="To date">
+      <div class="cb-search">
+        <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001q.044.06.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1 1 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/></svg>
+        <input type="search" name="q" class="cb-input" value="${esc(keyword)}"
+               placeholder="Search material, project, reason, notes" aria-label="Search movements">
+      </div>
 
-      <select name="type" class="cb-select">
+      <select name="type" class="cb-select" aria-label="Movement type">
         <option value="">All Movements</option>
         <option value="in"${type === 'in' ? ' selected' : ''}>Stock In Only</option>
         <option value="out"${type === 'out' ? ' selected' : ''}>Stock Out Only</option>
         <option value="adjust"${type === 'adjust' ? ' selected' : ''}>Adjustments Only</option>
       </select>
 
-      <select name="material" class="cb-select">
+      ${categorySelect(category)}
+
+      <select name="material" class="cb-select" aria-label="Material">
         <option value="">All Materials</option>
-        ${catalog.materials
+        ${materialChoices
           .map((m) => `<option value="${esc(m.id)}"${materialId === m.id ? ' selected' : ''}>${esc(m.name)}</option>`)
           .join('')}
       </select>
+
+      ${dateRangeHtml({ from: dateFrom, to: dateTo, idPrefix: 'rp' })}
     </form>
 
     <div class="row g-3 mb-3">
-      ${kpi('Stock In', `+${totals.totalIn.toLocaleString('en-PH')}`, 'units received', 'is-value')}
-      ${kpi('Stock Out', `-${totals.totalOut.toLocaleString('en-PH')}`, 'units withdrawn', 'is-out')}
+      ${kpi('Stock In', signedCount(totals.totalIn, '+'), 'units received', 'is-value')}
+      ${kpi('Stock Out', signedCount(totals.totalOut, '-'), 'units withdrawn', 'is-out')}
       ${
         totals.adjustmentCount > 0
           ? kpi(
               'Adjustments',
-              `${totals.adjustedUp - totals.adjustedDown >= 0 ? '+' : ''}${(totals.adjustedUp - totals.adjustedDown).toLocaleString('en-PH')}`,
+              signedNet(totals.adjustedUp - totals.adjustedDown),
               `across ${totals.adjustmentCount} correction${totals.adjustmentCount === 1 ? '' : 's'}`
             )
           : ''
       }
-      ${kpi(
-        'Net Change',
-        `${totals.net >= 0 ? '+' : ''}${totals.net.toLocaleString('en-PH')}`,
-        'units overall'
-      )}
+      ${kpi('Net Change', signedNet(totals.net), 'units overall')}
     </div>
 
     <div class="cb-card">
@@ -435,8 +467,8 @@ async function drawMovement() {
         ${
           movements.length === 0
             ? emptyReport(
-                'No movements in this range',
-                'Try widening the dates, or clearing the type and material filters.'
+                'No movements match',
+                'Try a wider date range, or clearing the search, type, category and material filters.'
               )
             : `
         <div class="cb-table-wrap">
@@ -448,6 +480,7 @@ async function drawMovement() {
                 <th>Category</th>
                 <th>Movement</th>
                 <th class="cb-num">Quantity</th>
+                <th>Project</th>
                 <th>Logged By</th>
                 <th>Details</th>
               </tr>
@@ -463,7 +496,8 @@ async function drawMovement() {
   `);
 
   wireCommon();
-  wireReportFilters(['from', 'to', 'type', 'material']);
+  const apply = wireReportFilters(['q', 'type', 'category', 'material', 'from', 'to']);
+  wireDateRange(container, () => apply());
 }
 
 // The last thirty days, which is what ReportController defaulted to
@@ -490,9 +524,13 @@ function movementRow(movement) {
   // found, which is why this falls back rather than assuming.
   const material = catalog.materials.find((m) => m.id === movement.materialId);
 
+  // An older stock-out kept its project in reference; that shows under
+  // Project, so it is not repeated as a reference here
+  const project = projectOf(movement);
+  const reference = movement.project || movement.type !== 'out' ? movement.reference : '';
   const details = [
     movement.reason ? reasonLabel(movement.reason) : '',
-    movement.reference ? (isIn ? `Ref: ${movement.reference}` : `Project: ${movement.reference}`) : '',
+    reference ? `Ref: ${reference}` : '',
     movement.notes || '',
   ].filter(Boolean);
 
@@ -500,7 +538,7 @@ function movementRow(movement) {
     <tr>
       <td class="text-muted">${esc(shortDate(movement.movementDate))}</td>
       <td class="cb-cell-name">${esc(movement.materialName)}</td>
-      <td>${material ? `<span class="cb-chip">${esc(material.category)}</span>` : '<span class="text-muted">-</span>'}</td>
+      <td>${material ? `<span class="cb-chip">${esc(categoryLabel(material.category))}</span>` : '<span class="text-muted">-</span>'}</td>
       <td>
         <span class="cb-move ${badgeClass}">
           ${esc(movementTypeLabel(movement.type))}
@@ -508,6 +546,7 @@ function movementRow(movement) {
         </span>
       </td>
       <td class="cb-num">${quantity}</td>
+      <td>${project ? esc(project) : '<span class="text-muted">—</span>'}</td>
       <td>${esc(personName(movement.loggedByName))}</td>
       <td class="text-muted" style="max-width:240px;">
         ${details.length > 0 ? esc(details.join(' · ')) : '-'}
@@ -527,29 +566,35 @@ function movementRow(movement) {
 // ============================================================
 
 function drawValue() {
-  const total = inventoryValue(catalog.materials);
+  const category = allQueryParams().category || '';
+  const scope = inCategory(catalog.materials, category);
+  const total = inventoryValue(scope);
 
   // Most valuable first, as Material::getValueReport() ordered it
-  const materials = [...catalog.materials]
+  const materials = [...scope]
     .map((material) => ({
       ...material,
       totalValue: (Number(material.stockQuantity) || 0) * (Number(material.costPerUnit) || 0),
     }))
     .sort((a, b) => b.totalValue - a.totalValue || a.name.localeCompare(b.name));
 
-  const byCategory = categoryStats(catalog.materials)
+  const byCategory = categoryStats(scope)
     .filter((row) => row.totalValue > 0)
     .sort((a, b) => b.totalValue - a.totalValue);
 
   // Materials with no cost recorded cannot be valued, and saying so is more
   // use than letting the total quietly understate the stock on hand.
-  const unpriced = catalog.materials.filter(
+  const unpriced = scope.filter(
     (m) => !m.costPerUnit && Number(m.stockQuantity) > 0
   ).length;
 
   render(container, `
     ${pageHead('Inventory Value Report', `Value of stock on hand as of ${today()}`)}
     ${tabs('value')}
+
+    <form class="cb-filters mb-3 d-print-none" id="cbReportFilters">
+      ${categorySelect(category)}
+    </form>
 
     <div class="row g-3 mb-3">
       <div class="col-12 col-lg-6">
@@ -578,7 +623,7 @@ function drawValue() {
               .map(
                 (row) => `
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <span class="cb-chip">${esc(row.category)}</span>
+                <span class="cb-chip">${esc(categoryLabel(row.category))}</span>
                 <span>
                   <strong>${esc(pesoShort(row.totalValue))}</strong>
                   <span class="text-muted" style="font-size:12px;">
@@ -624,6 +669,7 @@ function drawValue() {
   `);
 
   wireCommon();
+  wireReportFilters(['category']);
 }
 
 function valueRow(material, total) {
@@ -633,7 +679,7 @@ function valueRow(material, total) {
   return `
     <tr>
       <td class="cb-cell-name">${esc(material.name)}</td>
-      <td><span class="cb-chip">${esc(material.category)}</span></td>
+      <td><span class="cb-chip">${esc(categoryLabel(material.category))}</span></td>
       <td class="cb-num">
         ${stock} <span class="text-muted">${esc(material.unit)}</span>
       </td>
@@ -669,25 +715,60 @@ function emptyReport(title, text) {
     </div>`;
 }
 
+// The category filter, shared by every report that lists materials. The
+// value is the category as stored; the label is shown in Title Case.
+function categorySelect(selected) {
+  return `
+    <select name="category" class="cb-select" aria-label="Category">
+      <option value="">All Categories</option>
+      ${categoriesOf(catalog.materials)
+        .map(
+          (c) =>
+            `<option value="${esc(c)}"${selected === c ? ' selected' : ''}>${esc(categoryLabel(c))}</option>`
+        )
+        .join('')}
+    </select>`;
+}
+
+function inCategory(materials, category) {
+  return category ? materials.filter((m) => m.category === category) : materials;
+}
+
 // Report filters go into the URL and reload the report, which is how the
 // PHP pages worked: a filtered report stays printable and shareable because
 // its address describes it.
+//
+// Returns apply(), which the date range calls when its dates change. The
+// date boxes are left to the date range, which checks them first.
 function wireReportFilters(names) {
   const form = $('#cbReportFilters', container);
-  if (!form) return;
+  if (!form) return () => {};
 
   form.addEventListener('submit', (event) => event.preventDefault());
 
-  $$('select, input', form).forEach((control) => {
-    control.addEventListener('change', () => {
-      const next = {};
-      for (const name of names) {
-        const field = form.elements[name];
-        if (field && field.value) next[name] = field.value;
-      }
-      // A report rebuilds itself from the address, so it asks for the route
-      // to be run again rather than redrawing in place
-      setQuery(next, { reload: true });
-    });
+  const apply = () => {
+    const next = {};
+    for (const name of names) {
+      const field = form.elements[name];
+      if (field && field.value) next[name] = field.value;
+    }
+
+    // A material outside the chosen category no longer applies
+    const material = catalog.materials.find((m) => m.id === next.material);
+    if (next.category && material && material.category !== next.category) delete next.material;
+
+    // Both dates cleared means All time, which has to be said in the
+    // address, since no dates at all means the default range
+    if (names.includes('from') && !next.from && !next.to) next.range = 'all';
+
+    // A report rebuilds itself from the address, so it asks for the route
+    // to be run again rather than redrawing in place
+    setQuery(next, { reload: true });
+  };
+
+  $$('select, input:not([type="date"])', form).forEach((control) => {
+    control.addEventListener('change', apply);
   });
+
+  return apply;
 }
