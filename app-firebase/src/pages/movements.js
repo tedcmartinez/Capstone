@@ -672,6 +672,7 @@ async function runExport(destination) {
       const sheet = await exportToSheets({
         title: movementExportTitle(filters.dateFrom, filters.dateTo),
         rows,
+        tab: 'Movement History',
       });
       await recordExport('Google Sheets', movements.length, truncated, sheet.spreadsheetId);
       showNotice({ kind: 'sheets-done', url: sheet.spreadsheetUrl, rowCount: movements.length, truncated });

@@ -712,3 +712,11 @@
 .cb-filter-project {
     width: 180px;
 }
+
+/* The login page carries the system's full name under the logo */
+.cb-login-tag {
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.45;
+}

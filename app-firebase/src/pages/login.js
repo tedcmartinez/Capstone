@@ -13,7 +13,7 @@ import {
   resetPassword,
   isWebmasterEmail,
 } from '../lib/auth.js';
-import { COMPANY_NAME } from '../lib/config.js';
+import { COMPANY_NAME, SYSTEM_TITLE } from '../lib/config.js';
 
 // Which tab is showing, kept outside render() so a failed submission
 // redraws the form the user was already on.
@@ -27,7 +27,7 @@ export function renderLogin() {
         <div class="cb-login-head">
           <div class="cb-login-mark">C</div>
           <div class="cb-login-word">Cornerblock</div>
-          <div class="cb-login-tag">Materials Inventory Management System</div>
+          <div class="cb-login-tag">${esc(SYSTEM_TITLE)}</div>
         </div>
 
         <div class="cb-login-body">

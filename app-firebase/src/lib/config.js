@@ -40,8 +40,8 @@ export const WEBMASTER_EMAIL = 'tedcmartinez2@gmail.com';
 // IDENTITY AND VERSIONING
 // ============================================================
 
-export const APP_NAME = 'Cornerblock Inventory System';
-
+// The system's full name, as the capstone names it. Shown on the login
+// page, in the browser tab, in Settings and as the installed app's name.
 export const SYSTEM_TITLE =
   'Cloud-Based Materials Inventory Management System with Email Notification for Cornerblock Trading Inc.';
 

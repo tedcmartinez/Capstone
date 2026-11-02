@@ -1,4 +1,7 @@
-// Exporting the audit trail to Google Sheets
+// Exporting to Google Sheets
+//
+// Used by Movement History, which is where the export lives. It was on the
+// Audit Trail page first, which is why the tests are in audit-export.test.js.
 //
 // This runs entirely in the browser, which is what keeps it free: there is
 // no server to hold Google credentials, because the manager's own Google
@@ -20,7 +23,8 @@ import { auth } from './firebase.js';
 
 const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
-const SHEET_TAB = 'Audit Trail';
+// The tab inside the new spreadsheet, unless the caller names its own
+const DEFAULT_TAB = 'Movements';
 
 // Rows are sent in batches so a large export stays well inside the size a
 // single request may be
@@ -161,13 +165,13 @@ async function sheetsRequest(token, url, body) {
 
 // Creates the spreadsheet with its first row already frozen, so the header
 // stays in view however far down the manager scrolls
-export async function createSpreadsheet(token, title) {
+export async function createSpreadsheet(token, title, tab = DEFAULT_TAB) {
   const created = await sheetsRequest(token, SHEETS_API, {
     properties: { title },
     sheets: [
       {
         properties: {
-          title: SHEET_TAB,
+          title: tab,
           gridProperties: { frozenRowCount: 1 },
         },
       },
@@ -184,8 +188,8 @@ export async function createSpreadsheet(token, title) {
 // RAW means every value is stored exactly as text, never interpreted. Some
 // summaries contain text people typed, and USER_ENTERED would let a note
 // beginning with "=" run as a formula in the manager's spreadsheet.
-export async function appendRows(token, spreadsheetId, rows) {
-  const range = encodeURIComponent(`'${SHEET_TAB}'!A1`);
+export async function appendRows(token, spreadsheetId, rows, tab = DEFAULT_TAB) {
+  const range = encodeURIComponent(`'${tab}'!A1`);
   const url =
     `${SHEETS_API}/${spreadsheetId}/values/${range}:append` +
     '?valueInputOption=RAW&insertDataOption=INSERT_ROWS';
@@ -227,11 +231,11 @@ export async function formatSheet(token, spreadsheetId, sheetId, columnCount) {
 
 // rows includes the header as its first row. Returns the spreadsheet's
 // address for the "Open in Sheets" button.
-export async function exportToSheets({ title, rows }) {
+export async function exportToSheets({ title, rows, tab = DEFAULT_TAB }) {
   const token = await requestDriveToken();
 
-  const sheet = await createSpreadsheet(token, title);
-  await appendRows(token, sheet.spreadsheetId, rows);
+  const sheet = await createSpreadsheet(token, title, tab);
+  await appendRows(token, sheet.spreadsheetId, rows, tab);
   await formatSheet(token, sheet.spreadsheetId, sheet.sheetId, rows[0]?.length || 0);
 
   return sheet;
