@@ -234,6 +234,7 @@ function rolesCard() {
     ['Adjust stock to a counted figure', false, true, true],
     ['See cost and supplier', false, true, true],
     ['View dashboard and reports', false, true, true],
+    ['Export reports and movement history', false, true, true],
     ['Approve, disable and re-enable accounts', false, true, true],
     ['Demote a manager to staff', false, true, true],
     ['Delete a disabled account', false, true, true],

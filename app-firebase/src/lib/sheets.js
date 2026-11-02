@@ -1,7 +1,7 @@
 // Exporting to Google Sheets
 //
-// Used by Movement History, which is where the export lives. It was on the
-// Audit Trail page first, which is why the tests are in audit-export.test.js.
+// Used by Movement History and the four reports. It was on the Audit Trail
+// page first, which is why the tests are in audit-export.test.js.
 //
 // This runs entirely in the browser, which is what keeps it free: there is
 // no server to hold Google credentials, because the manager's own Google
@@ -163,31 +163,36 @@ async function sheetsRequest(token, url, body) {
   throw new Error(`Google Sheets refused the request (${response.status}). ${message}`.trim());
 }
 
-// Creates the spreadsheet with its first row already frozen, so the header
-// stays in view however far down the manager scrolls
-export async function createSpreadsheet(token, title, tab = DEFAULT_TAB) {
+// Creates the spreadsheet with one tab per name, each with its first row
+// already frozen, so the header stays in view however far down the manager
+// scrolls. `tabs` may be a single name.
+export async function createSpreadsheet(token, title, tabs = DEFAULT_TAB) {
+  const names = Array.isArray(tabs) ? tabs : [tabs];
+
   const created = await sheetsRequest(token, SHEETS_API, {
     properties: { title },
-    sheets: [
-      {
-        properties: {
-          title: tab,
-          gridProperties: { frozenRowCount: 1 },
-        },
+    sheets: names.map((name) => ({
+      properties: {
+        title: name,
+        gridProperties: { frozenRowCount: 1 },
       },
-    ],
+    })),
   });
+
+  const sheetIds = names.map((_, index) => created.sheets?.[index]?.properties?.sheetId ?? index);
 
   return {
     spreadsheetId: created.spreadsheetId,
     spreadsheetUrl: created.spreadsheetUrl,
-    sheetId: created.sheets?.[0]?.properties?.sheetId ?? 0,
+    sheetId: sheetIds[0],
+    sheetIds,
   };
 }
 
-// RAW means every value is stored exactly as text, never interpreted. Some
-// summaries contain text people typed, and USER_ENTERED would let a note
-// beginning with "=" run as a formula in the manager's spreadsheet.
+// RAW means every value is stored exactly as it is sent, never interpreted:
+// a number stays a number, so it can be summed in Sheets, and text stays
+// text. Some cells contain text people typed, and USER_ENTERED would let a
+// note beginning with "=" run as a formula in the manager's spreadsheet.
 export async function appendRows(token, spreadsheetId, rows, tab = DEFAULT_TAB) {
   const range = encodeURIComponent(`'${tab}'!A1`);
   const url =
@@ -199,29 +204,46 @@ export async function appendRows(token, spreadsheetId, rows, tab = DEFAULT_TAB) 
   }
 }
 
-// Bold header, then every column sized to what it holds. Autosizing comes
-// last because it measures the contents, so it has to run after they exist.
-export async function formatSheet(token, spreadsheetId, sheetId, columnCount) {
+// The formatting for one tab: bold header, peso columns with two decimals,
+// a bold Total row if the tab ends with one, then every column sized to
+// what it holds. Autosizing comes last because it measures the contents,
+// so it has to run after they exist. Kept separate so the tests can check
+// it without a network.
+export function formatRequests(sheetId, { columnCount, rowCount = 0, moneyColumns = [], total = false }) {
+  const bold = (startRowIndex, endRowIndex) => ({
+    repeatCell: {
+      range: { sheetId, startRowIndex, endRowIndex },
+      cell: { userEnteredFormat: { textFormat: { bold: true } } },
+      fields: 'userEnteredFormat.textFormat.bold',
+    },
+  });
+
+  const requests = [bold(0, 1)];
+
+  for (const column of moneyColumns) {
+    requests.push({
+      repeatCell: {
+        range: { sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: column, endColumnIndex: column + 1 },
+        cell: { userEnteredFormat: { numberFormat: { type: 'NUMBER', pattern: '#,##0.00' } } },
+        fields: 'userEnteredFormat.numberFormat',
+      },
+    });
+  }
+
+  if (total && rowCount > 1) requests.push(bold(rowCount - 1, rowCount));
+
+  requests.push({
+    autoResizeDimensions: {
+      dimensions: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: columnCount },
+    },
+  });
+
+  return requests;
+}
+
+export async function formatSheet(token, spreadsheetId, sheetId, columnCount, options = {}) {
   await sheetsRequest(token, `${SHEETS_API}/${spreadsheetId}:batchUpdate`, {
-    requests: [
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
-          cell: { userEnteredFormat: { textFormat: { bold: true } } },
-          fields: 'userEnteredFormat.textFormat.bold',
-        },
-      },
-      {
-        autoResizeDimensions: {
-          dimensions: {
-            sheetId,
-            dimension: 'COLUMNS',
-            startIndex: 0,
-            endIndex: columnCount,
-          },
-        },
-      },
-    ],
+    requests: formatRequests(sheetId, { columnCount, ...options }),
   });
 }
 
@@ -229,14 +251,24 @@ export async function formatSheet(token, spreadsheetId, sheetId, columnCount) {
 // THE WHOLE EXPORT
 // ============================================================
 
-// rows includes the header as its first row. Returns the spreadsheet's
-// address for the "Open in Sheets" button.
-export async function exportToSheets({ title, rows, tab = DEFAULT_TAB }) {
+// Either one tab, as { title, rows, tab }, or several, as { title, tabs }
+// where each tab is { name, rows, moneyColumns, total }. rows includes the
+// header as its first row. Returns the spreadsheet's address for the
+// "Open in Sheets" button.
+export async function exportToSheets({ title, rows, tab = DEFAULT_TAB, tabs }) {
+  const sheets = tabs || [{ name: tab, rows }];
   const token = await requestDriveToken();
 
-  const sheet = await createSpreadsheet(token, title, tab);
-  await appendRows(token, sheet.spreadsheetId, rows, tab);
-  await formatSheet(token, sheet.spreadsheetId, sheet.sheetId, rows[0]?.length || 0);
+  const sheet = await createSpreadsheet(token, title, sheets.map((t) => t.name));
+
+  for (const [index, t] of sheets.entries()) {
+    await appendRows(token, sheet.spreadsheetId, t.rows, t.name);
+    await formatSheet(token, sheet.spreadsheetId, sheet.sheetIds[index], t.rows[0]?.length || 0, {
+      rowCount: t.rows.length,
+      moneyColumns: t.moneyColumns || [],
+      total: Boolean(t.total),
+    });
+  }
 
   return sheet;
 }

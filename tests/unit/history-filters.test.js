@@ -177,7 +177,7 @@ describe('3.5 the Movement History export', () => {
 
     expect(header).toEqual([
       'Date and time', 'Type', 'Material', 'Category', 'Quantity', 'Unit', 'Reason',
-      'Project', 'Reference', 'Notes', 'Recorded by', 'Stock after',
+      'Project', 'Reference', 'Notes', 'Logged by', 'Stock after',
     ]);
     expect(header).toEqual(MOVEMENT_EXPORT_HEADER);
     expect(first).toEqual([

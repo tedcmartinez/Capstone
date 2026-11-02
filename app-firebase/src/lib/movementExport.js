@@ -5,7 +5,7 @@
 //
 // Columns, in order:
 //   Date and time, Type, Material, Category, Quantity, Unit, Reason,
-//   Project, Reference, Notes, Recorded by, Stock after
+//   Project, Reference, Notes, Logged by, Stock after
 // and, for a manager or the webmaster only:
 //   Unit cost, Value
 //
@@ -30,7 +30,7 @@ export const MOVEMENT_EXPORT_HEADER = [
   'Project',
   'Reference',
   'Notes',
-  'Recorded by',
+  'Logged by',
   'Stock after',
 ];
 

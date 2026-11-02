@@ -54,7 +54,7 @@ The project already exists. These are the settings it was created with, for refe
 | Authentication | Email/Password and Google sign-in enabled |
 | Web app | `cornerblock-web` |
 | Hosting | `cornerblock-inventory.web.app` |
-| Google Sheets API | Enabled, for the Movement History export |
+| Google Sheets API | Enabled, for the Movement History and report exports |
 
 The web app's configuration is in `app-firebase/src/lib/config.js`. It is safe to commit: it only identifies the project, and what anyone may do is decided by `firestore.rules`. No password, app password or service-account key is in this repository.
 
@@ -82,7 +82,7 @@ The OAuth consent screen is at https://console.cloud.google.com/auth/overview?pr
 
 **Why no Google verification is needed.** The only extra scope is `drive.file`, which Google classes as non-sensitive. It lets the system create files in a manager's Drive and see only the files it created. An app that asks only for non-sensitive scopes can be in production without Google's verification review.
 
-`drive.file` is not requested at sign-in. It is asked for only when a manager presses **Export to Google Sheets** on Movement History. A manager who signed in with a password, or who declines, is offered a CSV file instead.
+`drive.file` is not requested at sign-in. It is asked for only when a manager presses **Export to Google Sheets** on Movement History or one of the four reports. A manager who signed in with a password, or who declines, is offered a CSV file instead.
 
 ## Email alerts: the Apps Script
 
@@ -158,7 +158,7 @@ People who register with an email and password are sent a verification link. The
 | Adjust stock to a counted figure | | ✓ | ✓ |
 | See cost and supplier | | ✓ | ✓ |
 | Dashboard, reports, reorder checklist | | ✓ | ✓ |
-| Export Movement History to Google Sheets | | ✓ | ✓ |
+| Export Movement History and the reports to Google Sheets | | ✓ | ✓ |
 | Audit trail and its CSV download | | ✓ | ✓ |
 | Approve, reject, disable and re-enable accounts | | ✓ | ✓ |
 | Demote a manager to staff | | ✓ | ✓ |
@@ -238,7 +238,7 @@ Tests 1 to 12 are proved automatically by `npm run test:rules` and `npm run test
 | 12 | A stock-out larger than the stock on hand is blocked | Automated |
 | 13 | A stock-out reaching the threshold sends one low-stock email; another within 24 hours sends none; reaching zero sends a stock-out email to the manager | By hand |
 | 14 | The alert and checklist emails display correctly in the Gmail app on a phone | By hand |
-| 15 | Movement History, Export to Google Sheets: a spreadsheet in the manager's Drive with the filtered rows, and `movements.export` in the audit trail | By hand |
+| 15 | Movement History and each report, Export to Google Sheets: a spreadsheet in the manager's Drive with the filtered rows, and `movements.export` or `reports.export` in the audit trail | By hand |
 | 16 | A manager signed in with a password is offered a CSV file instead | By hand |
 | 17 | The internet drops during a stock-in: it syncs when the connection returns, with its audit entry | By hand |
 | 18 | The app installs from Chrome or Edge on the desktop and opens in its own window | By hand |

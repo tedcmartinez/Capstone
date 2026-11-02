@@ -8,6 +8,10 @@
 // All four are printable. The shop's manager prints the reorder checklist
 // and the low stock report to carry to a supplier, so the print rules in
 // style.css still apply and the page furniture is marked d-print-none.
+//
+// All four also export to Google Sheets, through one shared routine at the
+// end of this file. Each report only says what to export: its tabs, its
+// title and the filters on screen (see lib/reportExport.js for the rows).
 
 import {
   esc,
@@ -30,12 +34,10 @@ import {
   categoriesOf,
   lowStockOf,
   inventoryValue,
-  categoryStats,
 } from '../lib/materials.js';
 import {
   loadMovementsInRange,
   movementTotals,
-  movementMatcher,
   reasonLabel,
   movementTypeLabel,
   projectOf,
@@ -43,8 +45,29 @@ import {
 import { allQueryParams, setQuery } from '../lib/router.js';
 import { updateAlerts } from '../ui/shell.js';
 import { categoryLabel, signedCount, signedNet } from '../lib/format.js';
-import { countHeading, describeRange } from '../lib/dates.js';
+import { countHeading, describeRange, shopToday } from '../lib/dates.js';
 import { dateRangeHtml, wireDateRange } from '../ui/date-range.js';
+import { auditedWrite } from '../lib/audit.js';
+import { toCsv } from '../lib/auditTrail.js';
+import {
+  canExportToSheets,
+  exportToSheets,
+  downloadCsv,
+  SheetsDeclined,
+  SheetsNotEnabled,
+} from '../lib/sheets.js';
+import {
+  movementsForReport,
+  valueReportRows,
+  inventoryExportTabs,
+  lowStockExportTabs,
+  movementReportExportTabs,
+  valueExportTabs,
+  reportExportTitle,
+  movementReportExportTitle,
+  exportRowCount,
+  tabsAsCsvRows,
+} from '../lib/reportExport.js';
 
 export const renderInventoryReport = (container) => renderReport(container, 'inventory');
 export const renderLowStockReport = (container) => renderReport(container, 'lowstock');
@@ -80,6 +103,9 @@ function tabs(current) {
 const printIcon =
   '<svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1"/></svg>';
 
+const sheetsIcon =
+  '<svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm15 2h-4v3h4zm0 4h-4v3h4zm0 4h-4v3h3a1 1 0 0 0 1-1zm-5 3v-3H6v3zm-5 0v-3H1v2a1 1 0 0 0 1 1zm-4-4h4V8H1zm0-4h4V4H1zm5-3v3h4V4zm4 4H6v3h4z"/></svg>';
+
 function pageHead(title, subtitle, extraButtons = '') {
   return `
     <div class="cb-page-head d-print-none">
@@ -87,14 +113,21 @@ function pageHead(title, subtitle, extraButtons = '') {
         <h1 class="cb-page-title">${esc(title)}</h1>
         <p class="cb-page-sub">${esc(subtitle)}</p>
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-wrap">
         <button type="button" class="cb-btn cb-btn-outline" id="cbPrint">
           ${printIcon}
           Print
         </button>
+        <button type="button" class="cb-btn cb-btn-outline" id="cbExportSheets">
+          ${sheetsIcon}
+          Export to Google Sheets
+        </button>
         ${extraButtons}
       </div>
     </div>
+
+    <!-- Progress and the result of an export -->
+    <div id="cbExportNotice" class="d-print-none" aria-live="polite"></div>
 
     <!-- Shown only on paper, where the page furniture is hidden -->
     <div class="d-none d-print-block mb-3">
@@ -140,6 +173,7 @@ async function renderReport(target, which) {
 
 function wireCommon() {
   $('#cbPrint', container)?.addEventListener('click', () => window.print());
+  $('#cbExportSheets', container)?.addEventListener('click', () => runExport('sheets'));
 }
 
 const today = () =>
@@ -222,6 +256,18 @@ function drawInventory() {
       </div>
     </div>
   `);
+
+  const supplier = catalog.suppliers.find((s) => s.id === filters.supplierId);
+  setExport({
+    report: 'Inventory Report',
+    file: 'inventory-report',
+    tabs: () => inventoryExportTabs(materials),
+    filters: {
+      category: filters.category ? categoryLabel(filters.category) : '',
+      status: filters.status ? stockStatusLabel(filters.status) : '',
+      supplier: supplier?.name || '',
+    },
+  });
 
   wireCommon();
   wireReportFilters(['category', 'status', 'supplier']);
@@ -322,6 +368,13 @@ function drawLowStock() {
     </div>
   `);
 
+  setExport({
+    report: 'Low Stock Report',
+    file: 'low-stock-report',
+    tabs: () => lowStockExportTabs(materials, new Map(catalog.suppliers.map((s) => [s.id, s]))),
+    filters: { category: category ? categoryLabel(category) : '' },
+  });
+
   wireCommon();
   wireReportFilters(['category']);
 }
@@ -395,22 +448,14 @@ async function drawMovement() {
       ${pageHead('Stock Movement Report', `Movements ${rangeText}`)}
       ${tabs('movement')}
       ${alertHtml('danger', friendlyError(error))}`);
+    setExport(null);
     wireCommon();
     return;
   }
 
   // Type, category, material and the search are applied here rather than
-  // in the query, so changing one does not cost another read of the range.
-  // The search covers material, reason, reference, project, notes and who
-  // logged it, using the same matching as Movement History.
-  const inCategoryIds = category
-    ? new Set(catalog.materials.filter((m) => m.category === category).map((m) => m.id))
-    : null;
-  const match = movementMatcher({ materialIds: materialId ? null : inCategoryIds, keyword });
-
-  if (type) movements = movements.filter((m) => m.type === type);
-  if (materialId) movements = movements.filter((m) => m.materialId === materialId);
-  if (match) movements = movements.filter(match);
+  // in the query, so changing one does not cost another read of the range
+  movements = movementsForReport(movements, catalog.materials, { type, category, materialId, keyword });
 
   const totals = movementTotals(movements);
   const materialChoices = category
@@ -495,6 +540,21 @@ async function drawMovement() {
     </div>
   `);
 
+  const material = catalog.materials.find((m) => m.id === materialId);
+  setExport({
+    report: 'Stock Movement Report',
+    file: 'stock-movement-report',
+    tabs: () => movementReportExportTabs(movements, catalog.materials),
+    filters: {
+      type: { in: 'Stock In', out: 'Stock Out', adjust: 'Adjustments' }[type] || '',
+      category: category ? categoryLabel(category) : '',
+      material: material?.name || '',
+      search: keyword ? `Search "${keyword}"` : '',
+    },
+    dateFrom,
+    dateTo,
+  });
+
   wireCommon();
   const apply = wireReportFilters(['q', 'type', 'category', 'material', 'from', 'to']);
   wireDateRange(container, () => apply());
@@ -571,16 +631,7 @@ function drawValue() {
   const total = inventoryValue(scope);
 
   // Most valuable first, as Material::getValueReport() ordered it
-  const materials = [...scope]
-    .map((material) => ({
-      ...material,
-      totalValue: (Number(material.stockQuantity) || 0) * (Number(material.costPerUnit) || 0),
-    }))
-    .sort((a, b) => b.totalValue - a.totalValue || a.name.localeCompare(b.name));
-
-  const byCategory = categoryStats(scope)
-    .filter((row) => row.totalValue > 0)
-    .sort((a, b) => b.totalValue - a.totalValue);
+  const { materials, byCategory } = valueReportRows(scope);
 
   // Materials with no cost recorded cannot be valued, and saying so is more
   // use than letting the total quietly understate the stock on hand.
@@ -667,6 +718,13 @@ function drawValue() {
       </div>
     </div>
   `);
+
+  setExport({
+    report: 'Inventory Value Report',
+    file: 'inventory-value-report',
+    tabs: () => valueExportTabs(materials, byCategory),
+    filters: { category: category ? categoryLabel(category) : '' },
+  });
 
   wireCommon();
   wireReportFilters(['category']);
@@ -771,4 +829,165 @@ function wireReportFilters(names) {
   });
 
   return apply;
+}
+
+// ============================================================
+// EXPORT TO GOOGLE SHEETS
+//
+// One routine for all four reports. Each report calls setExport() with
+// what it shows: its name, its tabs (built from the rows on screen, so the
+// export always matches the filters) and those filters in words. Pressing
+// the button then:
+//   1. asks Google for Drive access, only now, never at sign-in
+//   2. creates the spreadsheet in the manager's own Drive
+//   3. records reports.export in the audit trail, with the report, the
+//      filters and the number of rows
+// A manager who signed in with a password has no Google Drive to write to,
+// and one who closes the Google window has declined, so both are offered
+// the same rows as a CSV file instead.
+//
+// The report pages are managers and the webmaster only (see the routes in
+// main.js), so everyone who sees the button may export.
+// ============================================================
+
+let exportSpec = null;
+
+function setExport(spec) {
+  exportSpec = spec;
+}
+
+// The filters in use, as words for the title: ['Solid Wood', 'Low Stock']
+function filterWords(spec) {
+  return Object.values(spec.filters).filter(Boolean);
+}
+
+function exportTitle(spec) {
+  if (spec.report === 'Stock Movement Report') {
+    return movementReportExportTitle(filterWords(spec), spec.dateFrom, spec.dateTo);
+  }
+  return reportExportTitle(spec.report, filterWords(spec));
+}
+
+// The filters as stored in the audit entry, keyed by what they are
+function auditFilters(spec) {
+  const described = Object.fromEntries(Object.entries(spec.filters).filter(([, value]) => value));
+  if (spec.report === 'Stock Movement Report') {
+    described.dates = describeRange(spec.dateFrom, spec.dateTo) || 'all time';
+  }
+  return Object.keys(described).length > 0 ? described : { scope: 'everything' };
+}
+
+function showExportNotice(notice) {
+  const target = $('#cbExportNotice', container);
+  if (!target) return;
+
+  if (notice.kind === 'sheets-done') {
+    target.innerHTML = `
+      <div class="cb-alert is-success">
+        <div>
+          <strong>${esc(notice.text)}</strong>
+          <div class="mt-2">
+            <a class="cb-btn cb-btn-primary cb-btn-sm" href="${esc(notice.url)}" target="_blank" rel="noopener">
+              Open in Sheets
+            </a>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (notice.kind === 'offer-csv') {
+    target.innerHTML = `
+      <div class="cb-alert is-info">
+        <div>
+          ${esc(notice.text)}
+          <div class="mt-2">
+            <button type="button" class="cb-btn cb-btn-outline cb-btn-sm" id="cbOfferCsv">
+              Download CSV instead
+            </button>
+          </div>
+        </div>
+      </div>`;
+    $('#cbOfferCsv', target).addEventListener('click', () => runExport('csv'));
+    return;
+  }
+
+  target.innerHTML = alertHtml(notice.kind, notice.text);
+}
+
+async function runExport(destination) {
+  const spec = exportSpec;
+  if (!spec) return;
+
+  const tabsToExport = spec.tabs();
+  const rowCount = exportRowCount(tabsToExport);
+  const rowsText = `${rowCount.toLocaleString('en-PH')} row${rowCount === 1 ? '' : 's'}`;
+
+  if (rowCount === 0) {
+    showExportNotice({ kind: 'info', text: 'There is nothing in this report to export. Try clearing a filter.' });
+    return;
+  }
+
+  // No Google sign-in means no Drive to save into, so go straight to the offer
+  if (destination === 'sheets' && !canExportToSheets()) {
+    showExportNotice({
+      kind: 'offer-csv',
+      text:
+        'You signed in with an email and password, so there is no Google Drive to save a spreadsheet in. ' +
+        'Download the report as a CSV file instead, or sign in with Google to export to Sheets.',
+    });
+    return;
+  }
+
+  const button = $('#cbExportSheets', container);
+  if (button) button.disabled = true;
+
+  try {
+    if (destination === 'sheets') {
+      showExportNotice({
+        kind: 'info',
+        text: 'Waiting for Google. A window will ask to let the system create the spreadsheet in your Drive.',
+      });
+      const sheet = await exportToSheets({ title: exportTitle(spec), tabs: tabsToExport });
+      await recordExport(spec, 'Google Sheets', rowCount, sheet.spreadsheetId);
+      showExportNotice({
+        kind: 'sheets-done',
+        url: sheet.spreadsheetUrl,
+        text: `${spec.report} exported to Google Sheets: ${rowsText}.`,
+      });
+    } else {
+      downloadCsv(`cornerblock-${spec.file}-${shopToday()}.csv`, toCsv(tabsAsCsvRows(tabsToExport)));
+      await recordExport(spec, 'CSV download', rowCount, null);
+      showExportNotice({ kind: 'success', text: `${spec.report} downloaded as a CSV file: ${rowsText}.` });
+    }
+  } catch (error) {
+    if (error instanceof SheetsDeclined || error instanceof SheetsNotEnabled) {
+      showExportNotice({ kind: 'offer-csv', text: error.message });
+    } else {
+      showExportNotice({ kind: 'danger', text: friendlyError(error) });
+    }
+  }
+
+  if (button) button.disabled = false;
+}
+
+async function recordExport(spec, destination, rowCount, spreadsheetId) {
+  const filters = auditFilters(spec);
+  const filtered = !filters.scope;
+
+  await auditedWrite([], {
+    action: 'reports.export',
+    entity: 'reports',
+    entityId: spreadsheetId,
+    after: {
+      report: spec.report,
+      destination,
+      rowCount,
+      filters,
+      ...(spreadsheetId ? { spreadsheetId } : {}),
+    },
+    summary:
+      `Exported the ${spec.report} to ${destination}: ` +
+      `${rowCount.toLocaleString('en-PH')} row${rowCount === 1 ? '' : 's'}${filtered ? ' (filtered)' : ''}`,
+  });
 }
