@@ -268,6 +268,8 @@ function actionBadgeClass(action = '') {
     return 'is-out';
   }
   if (action.startsWith('auth.')) return 'is-neutral';
+  // Data leaving the system, whichever page it left from
+  if (action.endsWith('.export')) return 'is-export';
   return 'is-healthy';
 }
 

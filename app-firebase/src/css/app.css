@@ -713,6 +713,18 @@
     width: 180px;
 }
 
+/* ============================================================
+   16. EXPORT BADGE
+   Every export in the Audit Trail (audit trail, movement history,
+   reports) shares one colour, so data leaving the system stands
+   out from the green of ordinary changes.
+   ============================================================ */
+
+.cb-badge.is-export {
+    background-color: var(--cb-border);
+    color: var(--cb-brown);
+}
+
 /* The login page carries the system's full name under the logo */
 .cb-login-tag {
     max-width: 320px;

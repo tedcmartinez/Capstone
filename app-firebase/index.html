@@ -14,13 +14,17 @@
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 
-    <!-- Bootstrap 5 and the Cornerblock stylesheet are served from public/ as
-         plain files, exactly as they were in the PHP version. style.css is
-         unchanged, including its relative font paths. -->
-    <link rel="stylesheet" href="/css/bootstrap.min.css">
-    <link rel="stylesheet" href="/css/style.css">
+    <!-- Bootstrap 5 and the Cornerblock stylesheets. They live in src/css/ so
+         the build gives them names made from their contents, like the
+         scripts (index-3f9a2c.css). A deploy that changes a stylesheet
+         therefore changes its address, and no browser or saved offline copy
+         can keep showing the old one next to the new scripts. style.css is
+         unchanged from the PHP version, including its relative font paths
+         (the fonts sit in src/assets/fonts/ and are named the same way). -->
+    <link rel="stylesheet" href="/src/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/src/css/style.css">
     <!-- Screens that only exist in the cloud version, so style.css stays unchanged -->
-    <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/src/css/app.css">
 </head>
 <body>
 

@@ -177,7 +177,7 @@ function hasFilters() {
 function draw() {
   const rows = sortMovementsInPage(page.movements, sort.field, sort.direction);
   const totals = movementTotals(page.movements);
-  const exportable = isManager() && canExportToSheets();
+  const exportable = isManager();
 
   render(container, `
     <div class="cb-page-head">
@@ -632,6 +632,17 @@ function describedFilters() {
 }
 
 async function runExport(destination) {
+  // No Google sign-in means no Drive to save into, so go straight to the offer
+  if (destination === 'sheets' && !canExportToSheets()) {
+    showNotice({
+      kind: 'offer-csv',
+      text:
+        'You signed in with an email and password, so there is no Google Drive to save a spreadsheet in. ' +
+        'Download the movements as a CSV file instead, or sign in with Google to export to Sheets.',
+    });
+    return;
+  }
+
   const button = $('#mvExportSheets', container);
   if (button) button.disabled = true;
   showNotice({ kind: 'info', text: 'Reading the movement history...' });

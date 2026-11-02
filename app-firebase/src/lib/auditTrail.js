@@ -70,6 +70,7 @@ export const AUDIT_ACTION_GROUPS = [
       'checklist.send': 'Reorder checklist sent',
       'audit.export': 'Audit trail exported',
       'movements.export': 'Movement history exported',
+      'reports.export': 'Report exported',
       'data.migrate': 'Data migrated',
     },
   },
@@ -301,6 +302,7 @@ const FIELD_LABELS = {
   email: 'Email',
   provider: 'Sign-in method',
   receiptId: 'Receipt',
+  report: 'Report',
   destination: 'Exported to',
   rowCount: 'Rows exported',
   filters: 'Filters used',
@@ -440,7 +442,9 @@ const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t', '\r'];
 export function csvCell(value) {
   let text = value === null || value === undefined ? '' : String(value);
 
-  if (text && FORMULA_TRIGGERS.includes(text[0])) {
+  // Only typed text is guarded. A number such as -3 is never a formula, and
+  // the apostrophe would turn it into text that cannot be summed.
+  if (typeof value !== 'number' && text && FORMULA_TRIGGERS.includes(text[0])) {
     text = `'${text}`;
   }
 

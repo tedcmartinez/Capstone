@@ -49,7 +49,7 @@ flowchart LR
 
 **The Apps Script.** Sending email needs a credential, and anything in the browser is visible to everyone using it. So email is sent by a separate Google Apps Script, owned by the alert account and running as that account, which needs no password. The app calls it after every stock-out with the material's id and the user's sign-in token. The script checks the token with Google, reads the material's real stock from Firestore itself, decides which alerts are due, sends them, and records each in `notification_log`. It ignores any figures in the request, so a tampered browser cannot fake or suppress an alert.
 
-**Google Sheets.** A manager can export the filtered movement history to a new spreadsheet in their own Drive. The Drive permission (`drive.file`) is asked for only at that moment, and only lets the system see files it created.
+**Google Sheets.** A manager can export the filtered movement history, or any of the four reports, to a new spreadsheet in their own Drive. The Drive permission (`drive.file`) is asked for only at that moment, and only lets the system see files it created.
 
 **Cost.** Nothing is paid for. The free limits and what happens when one is reached are in the README.
 
@@ -145,7 +145,7 @@ The audit trail. See section 4.
 
 | Field | Type | Notes |
 |---|---|---|
-| `action` | string | For example `stock.out`, `material.update`, `user.approve`, `user.delete`, `movements.export` |
+| `action` | string | For example `stock.out`, `material.update`, `user.approve`, `user.delete`, `movements.export`, `reports.export` |
 | `entity`, `entityId` | string, id | What was changed |
 | `materialId` | id or null | The material concerned, so a material's whole history can be found |
 | `actorUid`, `actorEmail`, `actorName`, `actorRole` | | Who did it, copied at the time |
@@ -176,7 +176,7 @@ Enforced in `firestore.rules` and mirrored in the interface. The rules tests pro
 | See cost and supplier | | ✓ | ✓ |
 | Adjust stock to a counted figure (reason required, online only) | | ✓ | ✓ |
 | Dashboard, reports, reorder checklist | | ✓ | ✓ |
-| Export Movement History to Google Sheets | | ✓ | ✓ |
+| Export Movement History and the reports to Google Sheets | | ✓ | ✓ |
 | Audit trail and CSV download | | ✓ | ✓ |
 | Approve, reject, disable, re-enable accounts | | ✓ | ✓ |
 | Demote a manager to staff | | ✓ | ✓ |
@@ -207,6 +207,8 @@ Applies to every role:
 
 **The Google Sheets export lives on Movement History,** which is the record a manager works from in a spreadsheet. It takes the filters on screen, includes every matching movement rather than one page, adds unit cost and value for managers, and is recorded as `movements.export` with the filters and number of rows.
 
+**Each report exports too,** from an Export to Google Sheets button next to Print. The spreadsheet holds what the report shows with its filters applied, numbers as numbers so they can be summed, and a Total row on the Inventory and Inventory Value reports; the value report adds a second tab, By Category. One routine in `pages/reports.js` does this for all four, and each export is recorded as `reports.export` with the report's name, the filters and the number of rows.
+
 ## 5. Offline entry and sync
 
 The office connection can drop. Stock In and Stock Out still work:
@@ -221,7 +223,7 @@ The office connection can drop. Stock In and Stock Out still work:
 
 **Adjustments are online only,** because an adjustment overrides the total with a counted figure, and that only makes sense against the figure the server holds right now.
 
-**The installed app's files** are kept by its service worker, so the window opens even with no connection.
+**The installed app's files** are kept by its service worker, so the window opens even with no connection. Online, it never shows an old file after a deploy: pages and fixed-name files come from the network first, and the built scripts and stylesheets are named after their contents, so a changed file has a new address the old copy cannot answer for.
 
 ## 6. What changed from the LAN version
 
@@ -272,7 +274,7 @@ Take these on the company desktop, in the installed app, signed in as the role g
 18. A movement row showing "Stock 4 → 9" and a receipt View.
 19. Movement History, Export to Google Sheets result, and the spreadsheet open in Sheets.
 20. Dashboard (manager).
-21. Each report: Inventory, Low Stock, Stock Movement, Inventory Value, with a category filter.
+21. Each report: Inventory, Low Stock, Stock Movement, Inventory Value, with a category filter, and the Inventory Value export open in Sheets showing both tabs.
 22. Reorder Checklist, on screen and printed.
 23. Audit Trail with filters, and an entry's detail showing before and after.
 24. Settings, with Email Alerts showing Working.

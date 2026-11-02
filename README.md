@@ -54,7 +54,7 @@ The project already exists. These are the settings it was created with, for refe
 | Authentication | Email/Password and Google sign-in enabled |
 | Web app | `cornerblock-web` |
 | Hosting | `cornerblock-inventory.web.app` |
-| Google Sheets API | Enabled, for the Movement History export |
+| Google Sheets API | Enabled, for the Movement History and report exports |
 
 The web app's configuration is in `app-firebase/src/lib/config.js`. It is safe to commit: it only identifies the project, and what anyone may do is decided by `firestore.rules`. No password, app password or service-account key is in this repository.
 
@@ -82,7 +82,7 @@ The OAuth consent screen is at https://console.cloud.google.com/auth/overview?pr
 
 **Why no Google verification is needed.** The only extra scope is `drive.file`, which Google classes as non-sensitive. It lets the system create files in a manager's Drive and see only the files it created. An app that asks only for non-sensitive scopes can be in production without Google's verification review.
 
-`drive.file` is not requested at sign-in. It is asked for only when a manager presses **Export to Google Sheets** on Movement History. A manager who signed in with a password, or who declines, is offered a CSV file instead.
+`drive.file` is not requested at sign-in. It is asked for only when a manager presses **Export to Google Sheets** on Movement History or one of the four reports. A manager who signed in with a password, or who declines, is offered a CSV file instead.
 
 ## Email alerts: the Apps Script
 
@@ -108,7 +108,8 @@ npm run deploy:hosting
 This builds the app into `dist/` and uploads it. The new version is live within a minute at https://cornerblock-inventory.web.app
 
 - Every page address is served with `no-cache`, so the next load after a deploy gets the new version.
-- Built scripts are named after their contents and cached for a year, which is safe because a new build gives them new names.
+- Built scripts, stylesheets and fonts (everything in `/assets/`) are named after their contents and cached for a year, which is safe because a changed file gets a new name. This is why the stylesheets live in `app-firebase/src/css/` rather than `public/`: with fixed names, a browser could show the new scripts with the old styles for up to an hour.
+- The few files that keep the same name (icons, the manifest, Bootstrap's script) are served with `no-cache`, and the service worker fetches them from the network first, keeping its saved copy for offline use.
 - The installed app's service worker notices the new version on its next start and replaces its saved copy of the files.
 - Source maps are built for local debugging but never uploaded.
 
@@ -157,7 +158,7 @@ People who register with an email and password are sent a verification link. The
 | Adjust stock to a counted figure | | ✓ | ✓ |
 | See cost and supplier | | ✓ | ✓ |
 | Dashboard, reports, reorder checklist | | ✓ | ✓ |
-| Export Movement History to Google Sheets | | ✓ | ✓ |
+| Export Movement History and the reports to Google Sheets | | ✓ | ✓ |
 | Audit trail and its CSV download | | ✓ | ✓ |
 | Approve, reject, disable and re-enable accounts | | ✓ | ✓ |
 | Demote a manager to staff | | ✓ | ✓ |
@@ -215,7 +216,7 @@ This runs three suites, which can also be run on their own:
 | `npm run test:rules` | `firestore.rules`: who may read and write what, the audit trail, receipts, projects, deletes | Java, for the emulator |
 | `npm run test:integration` | The app's own code against the Auth and Firestore emulators with the real rules: registration and approval, live account changes, stock movements including offline ones, the audit trail, filters and the migration | Java, for the emulators |
 
-At the last run: 346 unit, 97 rules and 117 integration tests, all passing.
+At the last run: 378 unit, 97 rules and 117 integration tests, all passing.
 
 ## Acceptance checklist
 
@@ -237,7 +238,7 @@ Tests 1 to 12 are proved automatically by `npm run test:rules` and `npm run test
 | 12 | A stock-out larger than the stock on hand is blocked | Automated |
 | 13 | A stock-out reaching the threshold sends one low-stock email; another within 24 hours sends none; reaching zero sends a stock-out email to the manager | By hand |
 | 14 | The alert and checklist emails display correctly in the Gmail app on a phone | By hand |
-| 15 | Movement History, Export to Google Sheets: a spreadsheet in the manager's Drive with the filtered rows, and `movements.export` in the audit trail | By hand |
+| 15 | Movement History and each report, Export to Google Sheets: a spreadsheet in the manager's Drive with the filtered rows, and `movements.export` or `reports.export` in the audit trail | By hand |
 | 16 | A manager signed in with a password is offered a CSV file instead | By hand |
 | 17 | The internet drops during a stock-in: it syncs when the connection returns, with its audit entry | By hand |
 | 18 | The app installs from Chrome or Edge on the desktop and opens in its own window | By hand |

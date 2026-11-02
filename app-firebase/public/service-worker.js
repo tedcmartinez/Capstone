@@ -77,9 +77,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Scripts, styles, fonts and icons: the saved copy if there is one,
-  // otherwise the network
+  // Built scripts, styles and fonts in /assets/ are named after their
+  // contents (index-3f9a2c.css), so a saved copy can never be out of date:
+  // a changed file gets a new name. Use the saved copy, otherwise the network.
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(request, { cacheName: CACHE }).then((saved) => saved || fetch(request))
+    );
+    return;
+  }
+
+  // Everything else keeps the same name across deploys (icons, the
+  // manifest, Bootstrap's script). Try the network first, like pages, so a
+  // deploy shows on the first load; the saved copy is only for offline.
   event.respondWith(
-    caches.match(request, { cacheName: CACHE }).then((saved) => saved || fetch(request))
+    fetch(request).catch(() => caches.match(request, { cacheName: CACHE }))
   );
 });
