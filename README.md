@@ -216,7 +216,7 @@ This runs three suites, which can also be run on their own:
 | `npm run test:rules` | `firestore.rules`: who may read and write what, the audit trail, receipts, projects, deletes | Java, for the emulator |
 | `npm run test:integration` | The app's own code against the Auth and Firestore emulators with the real rules: registration and approval, live account changes, stock movements including offline ones, the audit trail, filters and the migration | Java, for the emulators |
 
-At the last run: 346 unit, 97 rules and 117 integration tests, all passing.
+At the last run: 378 unit, 97 rules and 117 integration tests, all passing.
 
 ## Acceptance checklist
 
