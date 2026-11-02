@@ -191,16 +191,50 @@ export function lowStockExportTabs(materials, suppliersById = new Map()) {
 // ============================================================
 // 3. STOCK MOVEMENT REPORT
 // The same columns as the Movement History export, from the same builder,
-// without the manager's cost columns, which this report does not show.
+// with the manager's Unit cost and Value (at current cost), since the
+// report pages are managers only. It ends with a Total row of quantity and
+// value, so a report searched down to one project shows what that project
+// used.
 // ============================================================
 
 // movements: the movements on screen, already filtered, newest first
+// materials: the catalog, each with its costPerUnit (null when none)
 export function movementReportExportTabs(movements, materials) {
   const rows = movementExportRows(movements, {
     materialsById: new Map(materials.map((m) => [m.id, m])),
+    costsById: new Map(materials.map((m) => [m.id, { costPerUnit: m.costPerUnit }])),
   });
 
-  return [{ name: 'Stock Movements', rows, moneyColumns: [], total: false }];
+  const header = rows[0];
+  const quantityColumn = header.indexOf('Quantity');
+  const costColumn = header.indexOf('Unit cost');
+  const valueColumn = header.indexOf('Value (at current cost)');
+
+  let totalQuantity = 0;
+  let totalValue = 0;
+  let anyValue = false;
+  for (const row of rows.slice(1)) {
+    totalQuantity += row[quantityColumn];
+    if (row[valueColumn] !== '') {
+      totalValue += row[valueColumn];
+      anyValue = true;
+    }
+  }
+
+  // Blank like the rows when no movement here has a cost to value it by
+  const total = header.map(() => '');
+  total[0] = 'Total';
+  total[quantityColumn] = totalQuantity;
+  total[valueColumn] = anyValue ? money(totalValue) : '';
+
+  return [
+    {
+      name: 'Stock Movements',
+      rows: [...rows, total],
+      moneyColumns: [costColumn, valueColumn],
+      total: true,
+    },
+  ];
 }
 
 // ============================================================
