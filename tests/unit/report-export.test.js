@@ -23,7 +23,7 @@ import {
   LOW_STOCK_EXPORT_HEADER,
   VALUE_EXPORT_HEADER,
 } from '../../app-firebase/src/lib/reportExport.js';
-import { MOVEMENT_EXPORT_HEADER } from '../../app-firebase/src/lib/movementExport.js';
+import { MOVEMENT_EXPORT_HEADER, MANAGER_EXPORT_COLUMNS } from '../../app-firebase/src/lib/movementExport.js';
 import { filterMaterials, lowStockOf } from '../../app-firebase/src/lib/materials.js';
 import { formatRequests } from '../../app-firebase/src/lib/sheets.js';
 import { toCsv, actionLabel, isKnownAction } from '../../app-firebase/src/lib/auditTrail.js';
@@ -169,17 +169,58 @@ describe('the Stock Movement Report export', () => {
     },
   ];
 
-  it('uses the same columns as the Movement History export, without the cost columns', () => {
+  it('uses the same columns as the Movement History export, with the manager cost columns', () => {
     const [tab] = movementReportExportTabs(movements, catalog);
-    expect(tab.rows[0]).toEqual(MOVEMENT_EXPORT_HEADER);
+    expect(tab.rows[0]).toEqual([...MOVEMENT_EXPORT_HEADER, ...MANAGER_EXPORT_COLUMNS]);
     expect(tab.rows[0]).toEqual([
       'Date and time', 'Type', 'Material', 'Category', 'Quantity', 'Unit', 'Reason',
-      'Project', 'Reference', 'Notes', 'Logged by', 'Stock after',
+      'Project', 'Reference', 'Notes', 'Logged by', 'Stock after', 'Unit cost', 'Value (at current cost)',
     ]);
     expect(tab.rows[1]).toEqual([
       'Nov 2, 2026, 3:04 PM', 'Stock Out', 'Mahogany Plank 1x4', 'Solid Wood', 4, 'pcs',
-      'Project Usage', 'Sofa set for Ms. Reyes', '', 'frame', 'Juan', 20,
+      'Project Usage', 'Sofa set for Ms. Reyes', '', 'frame', 'Juan', 20, 220.5, 882,
     ]);
+  });
+
+  it('values each movement at the current unit cost, as numbers', () => {
+    const [tab] = movementReportExportTabs(movements, catalog);
+    expect(tab.rows[2].slice(-2)).toEqual([480, 2880]); // 6 cans of glue at 480
+    expect(tab.rows[3].slice(-2)).toEqual([150, 150]);
+    expect(tab.moneyColumns.map((i) => tab.rows[0][i])).toEqual(['Unit cost', 'Value (at current cost)']);
+  });
+
+  it('leaves unit cost and value blank for a material with no cost recorded, not 0', () => {
+    const sanding = {
+      id: 'd', materialId: 'm4', materialName: 'Sandpaper 120', type: 'out', quantity: 5,
+      reason: 'Project Usage', project: 'Sofa set for Ms. Reyes', loggedByName: 'Juan', afterQty: 35,
+    };
+    const [tab] = movementReportExportTabs([sanding], catalog);
+    expect(tab.rows[1].slice(-2)).toEqual(['', '']);
+    // Not a single cost to value by, so the total value is blank too
+    expect(tab.rows.at(-1).slice(-2)).toEqual(['', '']);
+    expect(tab.rows.at(-1)[4]).toBe(5);
+  });
+
+  it('ends with a Total row of quantity and value', () => {
+    const [tab] = movementReportExportTabs(movements, catalog);
+    const total = tab.rows.at(-1);
+    expect(total).toEqual(['Total', '', '', '', 11, '', '', '', '', '', '', '', '', 3912]);
+    expect(tab.total).toBe(true);
+    expect(exportRowCount([tab])).toBe(3);
+  });
+
+  it('shows what one project used when searched down to it', () => {
+    const sanding = {
+      id: 'd', materialId: 'm4', materialName: 'Sandpaper 120', type: 'out', quantity: 5,
+      reason: 'Project Usage', project: 'Sofa set for Ms. Reyes', loggedByName: 'Juan', afterQty: 35,
+    };
+    const shown = movementsForReport([...movements, sanding], catalog, { keyword: 'reyes' });
+    const [tab] = movementReportExportTabs(shown, catalog);
+
+    expect(tab.rows.slice(1, -1).map((row) => row[2])).toEqual(['Mahogany Plank 1x4', 'Sandpaper 120']);
+    // 4 planks at 220.50 plus 5 unpriced sheets, which add to the quantity only
+    expect(tab.rows.at(-1)[4]).toBe(9);
+    expect(tab.rows.at(-1).at(-1)).toBe(882);
   });
 
   it('applies the type, category, material and search on screen', () => {
@@ -196,7 +237,7 @@ describe('the Stock Movement Report export', () => {
   it('exports exactly the movements the filters leave', () => {
     const shown = movementsForReport(movements, catalog, { type: 'out' });
     const [tab] = movementReportExportTabs(shown, catalog);
-    expect(tab.rows.slice(1).map((row) => row[2])).toEqual(['Mahogany Plank 1x4', 'Narra Plank 2x2']);
+    expect(tab.rows.slice(1, -1).map((row) => row[2])).toEqual(['Mahogany Plank 1x4', 'Narra Plank 2x2']);
     expect(exportRowCount([tab])).toBe(2);
   });
 });

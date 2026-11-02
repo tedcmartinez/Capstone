@@ -186,13 +186,13 @@ describe('3.5 the Movement History export', () => {
     ]);
   });
 
-  it('adds Unit cost and Value only when costs are given, for managers', () => {
+  it('adds Unit cost and Value (at current cost) only when costs are given, for managers', () => {
     const rows = movementExportRows(movements, {
       materialsById,
       costsById: new Map([['m1', { costPerUnit: 220.5 }]]),
     });
 
-    expect(rows[0].slice(-2)).toEqual(['Unit cost', 'Value']);
+    expect(rows[0].slice(-2)).toEqual(['Unit cost', 'Value (at current cost)']);
     expect(rows[1].slice(-2)).toEqual([220.5, 882]);
     // A material with no cost recorded is left blank rather than shown as 0
     expect(rows[2].slice(-2)).toEqual(['', '']);

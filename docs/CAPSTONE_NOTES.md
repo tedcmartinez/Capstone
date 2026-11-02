@@ -205,9 +205,9 @@ Applies to every role:
 
 **Reading it:** the Audit Trail page (managers) filters by date range, user, action, category and material, and downloads the filtered entries as a CSV file. Exports are themselves recorded (`audit.export`).
 
-**The Google Sheets export lives on Movement History,** which is the record a manager works from in a spreadsheet. It takes the filters on screen, includes every matching movement rather than one page, adds unit cost and value for managers, and is recorded as `movements.export` with the filters and number of rows.
+**The Google Sheets export lives on Movement History,** which is the record a manager works from in a spreadsheet. It takes the filters on screen, includes every matching movement rather than one page, adds Unit cost and Value (at current cost) for managers, and is recorded as `movements.export` with the filters and number of rows.
 
-**Each report exports too,** from an Export to Google Sheets button next to Print. The spreadsheet holds what the report shows with its filters applied, numbers as numbers so they can be summed, and a Total row on the Inventory and Inventory Value reports; the value report adds a second tab, By Category. One routine in `pages/reports.js` does this for all four, and each export is recorded as `reports.export` with the report's name, the filters and the number of rows.
+**Each report exports too,** from an Export to Google Sheets button next to Print. The spreadsheet holds what the report shows with its filters applied, numbers as numbers so they can be summed, and a Total row on the Inventory, Stock Movement and Inventory Value reports; the value report adds a second tab, By Category. The Stock Movement export has the same columns as the Movement History one, costs included, and its Total row gives the quantity and value of what is listed, so a report searched down to one project shows what that project used. Value is at the current unit cost, since the system keeps no price history. One routine in `pages/reports.js` does this for all four, and each export is recorded as `reports.export` with the report's name, the filters and the number of rows.
 
 ## 5. Offline entry and sync
 

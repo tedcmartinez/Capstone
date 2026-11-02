@@ -7,12 +7,13 @@
 //   Date and time, Type, Material, Category, Quantity, Unit, Reason,
 //   Project, Reference, Notes, Logged by, Stock after
 // and, for a manager or the webmaster only:
-//   Unit cost, Value
+//   Unit cost, Value (at current cost)
 //
 // Unit, category and unit cost are not stored on a movement, so they are
 // looked up from the material as it is now. Value is the quantity at the
 // current unit cost, which is what the brief's inventory value report uses
-// too; the system does not keep a price history.
+// too; the system does not keep a price history, and the column says so.
+// A material with no cost recorded gets both cells blank, never 0.
 
 import { toDate } from './dom.js';
 import { reasonLabel } from './reasons.js';
@@ -34,7 +35,7 @@ export const MOVEMENT_EXPORT_HEADER = [
   'Stock after',
 ];
 
-export const MANAGER_EXPORT_COLUMNS = ['Unit cost', 'Value'];
+export const MANAGER_EXPORT_COLUMNS = ['Unit cost', 'Value (at current cost)'];
 
 const TYPE_LABELS = { in: 'Stock In', out: 'Stock Out', adjust: 'Adjustment' };
 
@@ -86,7 +87,9 @@ export function movementExportRows(movements, { materialsById = new Map(), costs
     ];
 
     if (costsById) {
-      const cost = Number(costsById.get(movement.materialId)?.costPerUnit);
+      // Number(null) is 0, so an empty cost is checked for first
+      const recorded = costsById.get(movement.materialId)?.costPerUnit;
+      const cost = recorded === null || recorded === undefined || recorded === '' ? NaN : Number(recorded);
       const known = Number.isFinite(cost);
       row.push(known ? cost : '', known ? Math.round(cost * quantity * 100) / 100 : '');
     }
