@@ -108,7 +108,8 @@ npm run deploy:hosting
 This builds the app into `dist/` and uploads it. The new version is live within a minute at https://cornerblock-inventory.web.app
 
 - Every page address is served with `no-cache`, so the next load after a deploy gets the new version.
-- Built scripts are named after their contents and cached for a year, which is safe because a new build gives them new names.
+- Built scripts, stylesheets and fonts (everything in `/assets/`) are named after their contents and cached for a year, which is safe because a changed file gets a new name. This is why the stylesheets live in `app-firebase/src/css/` rather than `public/`: with fixed names, a browser could show the new scripts with the old styles for up to an hour.
+- The few files that keep the same name (icons, the manifest, Bootstrap's script) are served with `no-cache`, and the service worker fetches them from the network first, keeping its saved copy for offline use.
 - The installed app's service worker notices the new version on its next start and replaces its saved copy of the files.
 - Source maps are built for local debugging but never uploaded.
 

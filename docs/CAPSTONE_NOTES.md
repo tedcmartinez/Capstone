@@ -221,7 +221,7 @@ The office connection can drop. Stock In and Stock Out still work:
 
 **Adjustments are online only,** because an adjustment overrides the total with a counted figure, and that only makes sense against the figure the server holds right now.
 
-**The installed app's files** are kept by its service worker, so the window opens even with no connection.
+**The installed app's files** are kept by its service worker, so the window opens even with no connection. Online, it never shows an old file after a deploy: pages and fixed-name files come from the network first, and the built scripts and stylesheets are named after their contents, so a changed file has a new address the old copy cannot answer for.
 
 ## 6. What changed from the LAN version
 
