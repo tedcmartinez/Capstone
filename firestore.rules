@@ -156,6 +156,27 @@ service cloud.firestore {
           && !exists(logPath(request.resource.data.lastAuditId));
     }
 
+    // A role may only change on an account that is active before and after.
+    // A pending account is approved first, and a disabled one re-enabled
+    // first, so nobody's role changes while they cannot see it.
+    function staysActive() {
+      return resource.data.status == 'active'
+          && request.resource.data.status == 'active';
+    }
+
+    // The audit entry for deleting users/{uid}: written in the same batch,
+    // new, a user.delete entry about this account, and named after the
+    // account's current lastAuditId. That name is never seen twice, so one
+    // entry cannot stand in for two deletions. The name is built the same
+    // way by deleteAuditId() in src/lib/audit.js.
+    function deletionAudited(uid) {
+      let logId = 'user-delete-' + uid + '-' + resource.data.lastAuditId;
+      return existsAfter(logPath(logId))
+          && !exists(logPath(logId))
+          && getAfter(logPath(logId)).data.action == 'user.delete'
+          && getAfter(logPath(logId)).data.entityId == uid;
+    }
+
     // ========================================================
     // STOCK ARITHMETIC
     //
@@ -299,11 +320,18 @@ service cloud.firestore {
 
       // Users maintain their own profile details. Role and status are not in
       // this list, so a user can never approve or promote themselves.
+      //
+      // emailVerified is what the manager's Users page shows as Verified, so
+      // it may only ever say what Google says: the email_verified claim in
+      // the caller's own sign-in token. Nobody can mark themselves verified
+      // without opening the link.
       allow update: if signedIn()
         && isRealUpdate()
         && request.auth.uid == uid
         && audited()
-        && changed().hasOnly(['name', 'photoURL', 'lastLoginAt', 'emailVerified', 'lastAuditId']);
+        && changed().hasOnly(['name', 'photoURL', 'lastLoginAt', 'emailVerified', 'lastAuditId'])
+        && (!changed().hasAny(['emailVerified'])
+            || request.resource.data.emailVerified == request.auth.token.email_verified);
 
       // Managing other people's accounts: approving, rejecting, disabling,
       // re-enabling, and changing roles.
@@ -337,11 +365,27 @@ service cloud.firestore {
         && resource.data.role != 'webmaster'
         && request.resource.data.role in ['production_staff', 'general_manager']
         && request.resource.data.status in ['pending', 'active', 'disabled']
-        && (isWebmaster() || !promotesToManager());
+        && (isWebmaster() || !promotesToManager())
+        && (request.resource.data.role == resource.data.role || staysActive());
 
-      // Accounts are disabled, never deleted, so movement history keeps
-      // pointing at a real person.
-      allow delete: if false;
+      // Deleting an account. Only one that has already been disabled, so
+      // removing someone is always a second, deliberate step. Never the
+      // webmaster, never your own, and only by a manager or the webmaster.
+      //
+      // Only the users document goes. The person's movements, receipts and
+      // audit entries stay, each carrying the name saved when it was made,
+      // so the history is not rewritten. The Firebase sign-in itself cannot
+      // be removed from the browser on the free plan; if the person signs in
+      // again they simply register as a new, pending request.
+      //
+      // A deleted document cannot carry lastAuditId, so the entry is found
+      // by a name built from the uid and the lastAuditId the document holds
+      // right now (deletionAudited() above).
+      allow delete: if isGM()
+        && request.auth.uid != uid
+        && resource.data.role != 'webmaster'
+        && resource.data.status == 'disabled'
+        && deletionAudited(uid);
     }
 
     // ========================================================

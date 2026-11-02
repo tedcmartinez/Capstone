@@ -303,3 +303,132 @@ describe('an account changed while it is in use', () => {
     expect(session.landingPath()).toBe('/materials');
   });
 });
+
+// ============================================================
+// 4. EMAIL VERIFICATION WHILE WAITING
+// ============================================================
+
+async function openVerificationLink(email) {
+  const response = await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${PROJECT_ID}/oobCodes`);
+  const code = ((await response.json()).oobCodes || [])
+    .filter((entry) => entry.email === email && entry.requestType === 'VERIFY_EMAIL')
+    .pop();
+  if (!code) throw new Error(`No verification email was sent to ${email}`);
+  await fetch(code.oobLink);
+}
+
+describe('verifying the email address while waiting', () => {
+  it('reports not verified until the link is opened, and writes nothing', async () => {
+    const user = await authLib.registerWithEmail('Maria Santos', 'maria@example.com', 'Shopfloor2026');
+    await readUserDoc(user.uid);
+
+    expect(await authLib.checkEmailVerified()).toBe(false);
+
+    const profile = await readUserDoc(user.uid);
+    expect(profile.emailVerified.booleanValue).toBe(false);
+  });
+
+  it('records the verification on the account once the link is opened', async () => {
+    const user = await authLib.registerWithEmail('Maria Santos', 'maria@example.com', 'Shopfloor2026');
+    await readUserDoc(user.uid);
+
+    await openVerificationLink('maria@example.com');
+    expect(await authLib.checkEmailVerified()).toBe(true);
+
+    // What the manager's Users page reads
+    const profile = await waitFor(async () => {
+      const fields = await readUserDoc(user.uid);
+      return fields?.emailVerified?.booleanValue ? fields : null;
+    });
+    expect(profile).not.toBeNull();
+
+    const entries = await waitFor(async () => {
+      const response = await fetch(
+        `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/audit_logs`,
+        { headers: OWNER }
+      );
+      const docs = (await response.json()).documents || [];
+      return docs.some((d) => d.fields.action.stringValue === 'user.verify_email') ? docs : null;
+    });
+    expect(entries).not.toBeNull();
+    expect(refusals()).toEqual([]);
+  });
+});
+
+// ============================================================
+// 5. DELETING AN ACCOUNT, AND COMING BACK
+// ============================================================
+
+describe('deleting a disabled account', () => {
+  it('removes the account, and the person can sign in again as a new request', async () => {
+    const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth');
+    const { auditedWrite, deleteAuditId } = await import('../../app-firebase/src/lib/audit.js');
+
+    // The employee registers, then signs out
+    const staff = await authLib.registerWithEmail('Juan Dela Cruz', 'juan@example.com', 'Shopfloor2026');
+    await readUserDoc(staff.uid);
+    await authLib.signOutUser();
+
+    // A manager, seeded directly
+    const gm = await createUserWithEmailAndPassword(auth, 'gm@example.com', 'Manager2026');
+    const seeded = await fetch(`${USERS_URL}?documentId=${gm.user.uid}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...OWNER },
+      body: JSON.stringify({
+        fields: {
+          name: { stringValue: 'Shop Manager' },
+          email: { stringValue: 'gm@example.com' },
+          role: { stringValue: 'general_manager' },
+          status: { stringValue: 'active' },
+          lastAuditId: { stringValue: 'seed' },
+        },
+      }),
+    });
+    expect(seeded.ok).toBe(true);
+    await authLib.bootstrapUser(gm.user, 'password');
+
+    // Disabled first, as the page requires, then deleted, both through the
+    // same auditedWrite() the Users page uses
+    await auditedWrite([{ type: 'update', collection: 'users', id: staff.uid, data: { status: 'disabled' } }], {
+      action: 'user.disable',
+      entity: 'users',
+      entityId: staff.uid,
+    });
+    const disabled = await waitFor(async () => {
+      const fields = await readUserDoc(staff.uid);
+      return fields?.status?.stringValue === 'disabled' ? fields : null;
+    });
+
+    const lastAuditId = disabled.lastAuditId.stringValue;
+    await auditedWrite(
+      [{ type: 'delete', collection: 'users', id: staff.uid }],
+      {
+        action: 'user.delete',
+        entity: 'users',
+        entityId: staff.uid,
+        before: { name: 'Juan Dela Cruz', email: 'juan@example.com', role: 'production_staff' },
+      },
+      { auditId: deleteAuditId(staff.uid, lastAuditId) }
+    );
+
+    const gone = await waitFor(async () => {
+      const response = await fetch(`${USERS_URL}/${staff.uid}`, { headers: OWNER });
+      return response.status === 404;
+    });
+    expect(gone).toBe(true);
+
+    await authLib.signOutUser();
+
+    // The same person signs in again: a new pending request, no errors
+    const reports = startAuthWatch();
+    await signInWithEmailAndPassword(auth, 'juan@example.com', 'Shopfloor2026');
+
+    const settled = await waitFor(() => reports.find((r) => r.user || r.error));
+    expect(settled.error).toBeNull();
+    expect(settled.user.status).toBe('pending');
+
+    const profile = await readUserDoc(staff.uid);
+    expect(profile.status.stringValue).toBe('pending');
+    expect(refusals()).toEqual([]);
+  });
+});

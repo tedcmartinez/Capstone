@@ -26,6 +26,7 @@ import {
   stockStatusLabel,
   alertHtml,
   friendlyError,
+  personName,
 } from '../lib/dom.js';
 import {
   loadCatalog,
@@ -464,6 +465,6 @@ function recentRow(movement) {
       </td>
       <td class="cb-num">${quantity}</td>
       <td class="text-muted">${esc(shortDate(movement.movementDate))}</td>
-      <td>${esc(movement.loggedByName || '')}</td>
+      <td>${esc(personName(movement.loggedByName))}</td>
     </tr>`;
 }

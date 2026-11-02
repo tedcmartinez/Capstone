@@ -22,6 +22,7 @@ import {
   stockStatusLabel,
   alertHtml,
   friendlyError,
+  personName,
 } from '../lib/dom.js';
 import {
   loadCatalog,
@@ -507,7 +508,7 @@ function movementRow(movement) {
         </span>
       </td>
       <td class="cb-num">${quantity}</td>
-      <td>${esc(movement.loggedByName || '')}</td>
+      <td>${esc(personName(movement.loggedByName))}</td>
       <td class="text-muted" style="max-width:240px;">
         ${details.length > 0 ? esc(details.join(' · ')) : '-'}
         ${

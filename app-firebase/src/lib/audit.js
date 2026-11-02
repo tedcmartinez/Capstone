@@ -92,6 +92,8 @@ function buildEntry(entry) {
 // ops is a list of document changes, each one:
 //   { type: 'set' | 'merge' | 'update', collection: 'materials', id: 'abc',
 //     data: { ... } }
+// or, for removing a document, which only user accounts allow:
+//   { type: 'delete', collection: 'users', id: 'abc' }
 //
 // entry describes the change for the trail:
 //   { action, entity, entityId, before, after, summary }
@@ -109,12 +111,22 @@ function buildEntry(entry) {
 //
 // Without options.track the behaviour is unchanged: the write is awaited
 // and a refusal is thrown to the caller.
+//
+// options.auditId names the entry instead of a random id. Only a delete
+// needs it: a deleted document cannot carry lastAuditId, so the rules find
+// the entry by a name they can work out themselves (see deleteAuditId()).
 export async function auditedWrite(ops, entry, options = {}) {
-  const auditId = newAuditId();
+  const auditId = options.auditId || newAuditId();
   const batch = writeBatch(db);
 
   for (const op of ops) {
     const ref = doc(db, op.collection, op.id);
+
+    if (op.type === 'delete') {
+      batch.delete(ref);
+      continue;
+    }
+
     const data = { ...op.data, lastAuditId: auditId };
 
     if (op.type === 'set') {
@@ -137,6 +149,15 @@ export async function auditedWrite(ops, entry, options = {}) {
 
   await batch.commit();
   return { auditId, status: CONFIRMED };
+}
+
+// The audit entry id for deleting a user account. Built from the account's
+// uid and the lastAuditId it holds at that moment, which the rules can read
+// from the document before it goes. lastAuditId changes with every write,
+// so the same name can never come up twice, even for an account that is
+// deleted, registers again, and is deleted again.
+export function deleteAuditId(uid, lastAuditId) {
+  return `user-delete-${uid}-${lastAuditId}`;
 }
 
 // ============================================================

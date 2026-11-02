@@ -16,6 +16,7 @@ import {
   resolve,
   currentPath,
   routeMeta,
+  leavePage,
 } from './lib/router.js';
 import {
   currentUser,
@@ -170,6 +171,10 @@ setGuard((path) => {
 // ============================================================
 
 function renderCurrentScreen() {
+  // A gate screen replaces whatever page was open, so that page's live
+  // listeners are stopped first. resolve() does the same for ordinary pages.
+  if (authError || webmasterVerification || isPending() || isDisabled()) leavePage();
+
   if (authError) {
     renderAuthError(authError);
     return;

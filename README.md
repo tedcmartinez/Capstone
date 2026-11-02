@@ -102,6 +102,14 @@ Two rules apply to everyone, the webmaster included: nobody can change their own
 
 Only the webmaster can make someone a manager. That keeps the shop from being locked out: if every manager were removed or demoted, the webmaster could still appoint a new one.
 
+### Deleting an account
+
+A disabled account can be deleted from the **Disabled** tab. Only disabled ones, never your own, and never the webmaster's. A manager can delete disabled staff and disabled managers; staff can delete no one.
+
+Deleting removes the person's `users` record, with a `user.delete` entry in the audit trail. Their stock movements, receipts and audit entries are kept, and still show the name saved on them.
+
+The free Spark plan has no Cloud Functions, so the app cannot remove the person's **Firebase sign-in** itself. Until it is removed, the person can still sign in, and arrives as a new pending request that a manager can reject. To remove the sign-in completely, open **Firebase console > Authentication > Users**, find the address, and choose **Delete account**.
+
 The webmaster is whoever signs in with the verified address `tedcmartinez2@gmail.com`. This is the only identity written into the system, and only as an email address, never a password. It appears in two places that must always match: `WEBMASTER_EMAIL` in `app-firebase/src/lib/config.js`, and `isWebmaster()` in `firestore.rules`.
 
 ## Google sign-in and the consent screen

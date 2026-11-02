@@ -305,6 +305,11 @@ function toSessionUser(firebaseUser, provider, profile) {
     provider: profile.provider || provider,
     role: profile.role,
     status: profile.status,
+
+    // What the users document says, which can lag behind Firebase: someone
+    // may open the link while signed out. checkEmailVerified() uses it to
+    // update the document only when it is actually behind.
+    profileEmailVerified: profile.emailVerified === true,
   };
 }
 
@@ -351,4 +356,49 @@ export async function refreshVerification() {
   await auth.currentUser.reload();
   await auth.currentUser.getIdToken(true);
   return auth.currentUser.emailVerified;
+}
+
+// ============================================================
+// EMAIL VERIFICATION WHILE WAITING
+//
+// The Request sent screen checks this every 15 seconds and whenever the tab
+// comes back into focus, so the person sees "Email verified" soon after
+// opening the link, wherever they opened it.
+//
+// When the address turns out to be verified, the users document is updated
+// to say so, which is what makes the manager's Users page show Verified
+// without the person having to sign in again. The token is refreshed first,
+// because the rules only accept emailVerified: true when the caller's token
+// says the same, and the token issued at sign-in still says false.
+//
+// Returns true once verified.
+// ============================================================
+
+export async function checkEmailVerified() {
+  const firebaseUser = auth.currentUser;
+  if (!firebaseUser) return false;
+
+  await firebaseUser.reload();
+  if (!firebaseUser.emailVerified) return false;
+
+  await firebaseUser.getIdToken(true);
+
+  const user = currentUser();
+  if (user && user.uid === firebaseUser.uid && !user.profileEmailVerified) {
+    setCurrentUser({ ...user, emailVerified: true, profileEmailVerified: true });
+
+    await auditedWrite(
+      [{ type: 'update', collection: 'users', id: user.uid, data: { emailVerified: true } }],
+      {
+        action: 'user.verify_email',
+        entity: 'users',
+        entityId: user.uid,
+        before: { emailVerified: false },
+        after: { emailVerified: true },
+        summary: `${user.name || user.email} verified their email address`,
+      }
+    );
+  }
+
+  return true;
 }

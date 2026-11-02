@@ -17,6 +17,7 @@ import {
   longDateTime,
   alertHtml,
   friendlyError,
+  personName,
 } from '../lib/dom.js';
 import {
   AUDIT_ACTION_GROUPS,
@@ -250,7 +251,7 @@ function row(entry) {
     <tr>
       <td class="text-muted" style="white-space:nowrap;">${esc(longDateTime(entry.timestamp))}</td>
       <td>
-        <div class="cb-cell-name">${esc(entry.actorName || entry.actorEmail || '(unknown)')}</div>
+        <div class="cb-cell-name">${esc(entry.actorName || entry.actorEmail || personName(''))}</div>
         <div class="cb-cell-sub">${esc(ROLE_LABELS[entry.actorRole] || entry.actorRole || '')}</div>
       </td>
       <td>
@@ -320,7 +321,7 @@ function showDetail(entryId) {
     <dl class="cb-detail-list">
       <dt>By</dt>
       <dd>
-        ${esc(entry.actorName || '(unknown)')}
+        ${esc(personName(entry.actorName))}
         ${entry.actorEmail ? `<span class="text-muted">${esc(entry.actorEmail)}</span>` : ''}
       </dd>
       <dt>Role at the time</dt>

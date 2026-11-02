@@ -113,6 +113,21 @@
     font-weight: 600;
 }
 
+/* The verification lines on the Request sent screen */
+.cb-gate-note {
+    margin: 0 0 12px;
+    color: var(--cb-muted);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.cb-gate-verified {
+    margin: 0 0 16px;
+    color: var(--cb-green);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 /* ============================================================
    3. TABLE CELL EMPHASIS
    The first column of a table is the record's name, shown a
@@ -423,4 +438,48 @@
 .cb-diff tr.is-changed .cb-diff-after {
     color: var(--cb-green);
     font-weight: 600;
+}
+
+/* ============================================================
+   11. USERS TABLE
+   Six columns, several holding badges, on a normal desktop
+   width without a sideways scrollbar. The name always shows in
+   full and wraps if it must; a long email is cut short with an
+   ellipsis instead, and the full address is in its tooltip.
+   ============================================================ */
+
+.cb-users-table tbody td {
+    padding-left: 12px;
+    padding-right: 12px;
+}
+
+.cb-users-name {
+    min-width: 150px;
+}
+
+.cb-users-email {
+    max-width: 260px;
+}
+
+.cb-users-email .cb-badge {
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.cb-truncate {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.cb-users-email .cb-truncate {
+    max-width: 190px;
+}
+
+.cb-users-table .cb-row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }

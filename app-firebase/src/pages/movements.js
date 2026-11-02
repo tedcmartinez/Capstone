@@ -18,6 +18,7 @@ import {
   longDateTime,
   alertHtml,
   friendlyError,
+  personName,
 } from '../lib/dom.js';
 import {
   loadMovements,
@@ -332,7 +333,7 @@ function row(movement) {
       <td class="text-muted" title="${esc(longDateTime(movement.createdAt))}">
         ${esc(shortDate(movement.movementDate))}
       </td>
-      <td>${esc(movement.loggedByName || '')}</td>
+      <td>${esc(personName(movement.loggedByName))}</td>
       <td class="text-muted" style="max-width:260px;">
         ${details.length > 0 ? esc(details.join(' · ')) : '-'}
         ${beforeAfterNote(movement)}

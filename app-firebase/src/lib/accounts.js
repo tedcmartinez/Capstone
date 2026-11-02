@@ -25,6 +25,7 @@ const NONE = {
   enable: false,
   promote: false,
   demote: false,
+  remove: false,
 };
 
 // viewer: the signed-in person, { uid, role, status }
@@ -53,19 +54,29 @@ export function accountActions(viewer, target) {
   }
 
   const isPending = target.status === STATUS_PENDING;
+  const isActive = target.status === STATUS_ACTIVE;
+  const isDisabled = target.status === STATUS_DISABLED;
 
   return {
     approve: isPending,
     reject: isPending,
-    disable: target.status === STATUS_ACTIVE,
-    enable: target.status === STATUS_DISABLED,
+    disable: isActive,
+    enable: isDisabled,
 
-    // Only the webmaster may make someone a manager. Offered once the
-    // account is approved, so approval and promotion stay two decisions.
-    promote: viewerIsWebmaster && !isPending && target.role === ROLE_PRODUCTION_STAFF,
+    // Roles change only on active accounts. A pending account is approved
+    // first, so approval and promotion stay two decisions, and a disabled
+    // one is re-enabled first, so nobody's role changes while they are
+    // locked out and cannot see it.
+    //
+    // Only the webmaster may make someone a manager
+    promote: viewerIsWebmaster && isActive && target.role === ROLE_PRODUCTION_STAFF,
 
     // Either kind of manager may return a manager to staff
-    demote: !isPending && target.role === ROLE_GENERAL_MANAGER,
+    demote: isActive && target.role === ROLE_GENERAL_MANAGER,
+
+    // Only a disabled account can be deleted, so deleting is always a
+    // second, deliberate step after switching the account off
+    remove: isDisabled,
 
     reason: null,
   };

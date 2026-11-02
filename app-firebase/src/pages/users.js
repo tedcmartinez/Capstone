@@ -11,14 +11,16 @@
 
 import {
   collection,
-  getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
 } from 'firebase/firestore';
 
 import { db } from '../lib/firebase.js';
-import { auditedWrite } from '../lib/audit.js';
+import { auditedWrite, deleteAuditId } from '../lib/audit.js';
+import { onLeave } from '../lib/router.js';
+import { confirmDialog } from '../ui/confirm.js';
 import {
   esc,
   render,
@@ -43,7 +45,10 @@ let users = [];
 let activeTab = STATUS_PENDING;
 let message = null;
 
-export async function renderUsers(container) {
+// The list is live: a new registration, a colleague approving someone on
+// another computer, or a waiting employee confirming their email all show
+// up here without a reload. The listener stops when the page is left.
+export function renderUsers(container) {
   render(container, `
     <div class="cb-page-head">
       <div>
@@ -52,25 +57,35 @@ export async function renderUsers(container) {
       </div>
     </div>`);
 
-  try {
-    const snapshot = await getDocs(query(collection(db, 'users'), orderBy('name')));
-    users = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-  } catch (error) {
-    render(container, `
-      <div class="cb-page-head">
-        <div><h1 class="cb-page-title">Users</h1></div>
-      </div>
-      ${alertHtml('danger', friendlyError(error))}`);
-    return;
-  }
+  let first = true;
+  message = null;
 
-  // Land on the tab that needs attention. A manager opening this page almost
-  // always does so because somebody is waiting, so Pending is shown first
-  // when there is anyone in it.
-  const pendingCount = users.filter((u) => u.status === STATUS_PENDING).length;
-  if (pendingCount === 0 && activeTab === STATUS_PENDING) activeTab = STATUS_ACTIVE;
+  const stop = onSnapshot(
+    query(collection(db, 'users'), orderBy('name')),
+    (snapshot) => {
+      users = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
 
-  draw(container);
+      // Land on the tab that needs attention. A manager opening this page
+      // almost always does so because somebody is waiting, so Pending is
+      // shown first when there is anyone in it.
+      if (first) {
+        first = false;
+        const pendingCount = users.filter((u) => u.status === STATUS_PENDING).length;
+        activeTab = pendingCount > 0 ? STATUS_PENDING : STATUS_ACTIVE;
+      }
+
+      draw(container);
+    },
+    (error) => {
+      render(container, `
+        <div class="cb-page-head">
+          <div><h1 class="cb-page-title">Users</h1></div>
+        </div>
+        ${alertHtml('danger', friendlyError(error))}`);
+    }
+  );
+
+  onLeave(stop);
 }
 
 function draw(container) {
@@ -146,7 +161,7 @@ function emptyState() {
 function table(rows) {
   return `
     <div class="cb-table-wrap">
-      <table class="cb-table">
+      <table class="cb-table cb-users-table">
         <thead>
           <tr>
             <th>Name</th>
@@ -171,17 +186,17 @@ function row(user) {
 
   return `
     <tr>
-      <td>
+      <td class="cb-users-name">
         <span class="cb-cell-strong">${esc(user.name || '(no name)')}</span>
-        ${isSelf ? '<span class="cb-badge is-neutral ms-2">You</span>' : ''}
-        ${targetIsWebmaster ? '<span class="cb-badge is-brand ms-2">Webmaster</span>' : ''}
+        ${isSelf ? '<span class="cb-badge is-neutral ms-1">You</span>' : ''}
+        ${targetIsWebmaster ? '<span class="cb-badge is-brand ms-1">Webmaster</span>' : ''}
       </td>
-      <td>
-        ${esc(user.email || '')}
+      <td class="cb-users-email">
+        <span class="cb-truncate" title="${esc(user.email || '')}">${esc(user.email || '')}</span>
         ${
           user.emailVerified
-            ? '<span class="cb-badge is-healthy ms-2">Verified</span>'
-            : '<span class="cb-badge is-low ms-2">Unverified</span>'
+            ? '<span class="cb-badge is-healthy">Verified</span>'
+            : '<span class="cb-badge is-low">Unverified</span>'
         }
       </td>
       <td>${esc(user.provider === 'google.com' ? 'Google' : 'Password')}</td>
@@ -191,9 +206,6 @@ function row(user) {
     </tr>`;
 }
 
-// Which buttons a row gets. These mirror firestore.rules exactly: anything
-// the rules would refuse is not offered, so a manager is never presented
-// with a button that fails when clicked.
 // Which buttons a row gets. Decided by accountActions() in lib/accounts.js,
 // which mirrors the users rule in firestore.rules, so a manager is never
 // offered a button that would be refused, and never denied one the rules
@@ -230,6 +242,9 @@ function actions(user) {
       `<button type="button" class="cb-btn cb-btn-sm cb-btn-outline" data-act="role" data-id="${id}" data-role="${roleAfter('demote')}">Make Staff</button>`
     );
   }
+  if (allowed.remove) {
+    buttons.push(`<button type="button" class="cb-btn cb-btn-sm cb-btn-danger" data-act="delete" data-id="${id}">Delete</button>`);
+  }
 
   return buttons.length
     ? `<div class="cb-row-actions">${buttons.join('')}</div>`
@@ -258,16 +273,63 @@ function wire(container) {
   });
 }
 
-async function perform(container, button, user, action, nextRole) {
-  // A rejection and a disable both lock somebody out, so they are confirmed.
-  // An approval is not, since it is the expected, harmless action.
-  const confirmations = {
-    reject: `Reject ${user.name}? The account stays on record but cannot be used.`,
-    disable: `Disable ${user.name}? They will be signed out and cannot sign back in.`,
-    role: `Change the role for ${user.name} to ${ROLE_LABELS[nextRole]}?`,
-  };
+// Confirmation for each action that needs one. Rejecting, disabling and
+// deleting lock somebody out, and a role change alters what they can see.
+// Approval is only questioned when the address is still unconfirmed, which
+// is the one sign that the person may not be who they claim. Exported for
+// tests/unit/users-page.test.js.
+export function confirmationFor(action, user, nextRole) {
+  switch (action) {
+    case 'approve':
+      return user.emailVerified
+        ? null
+        : {
+            title: 'Approve unverified account',
+            text: `${user.email} hasn't verified their email yet. Approve anyway?`,
+            confirmLabel: 'Approve',
+          };
+    case 'reject':
+      return {
+        title: 'Reject request',
+        text: `Reject ${user.name}? The account stays on record but cannot be used.`,
+        confirmLabel: 'Reject',
+        danger: true,
+      };
+    case 'disable':
+      return {
+        title: 'Disable account',
+        text: `Disable ${user.name}? They will be signed out and cannot sign back in.`,
+        confirmLabel: 'Disable',
+        danger: true,
+      };
+    case 'role':
+      return {
+        title: 'Change role',
+        text: `Change the role for ${user.name} to ${ROLE_LABELS[nextRole]}?`,
+        confirmLabel: 'Change Role',
+      };
+    case 'delete':
+      return {
+        title: 'Delete account',
+        text:
+          `Delete ${user.name} (${user.email})? They lose access, and if they sign in again ` +
+          "they'll appear as a new request. Their past stock movements and audit entries are kept.",
+        confirmLabel: 'Delete',
+        danger: true,
+      };
+    default:
+      return null;
+  }
+}
 
-  if (confirmations[action] && !window.confirm(confirmations[action])) return;
+async function perform(container, button, user, action, nextRole) {
+  const question = confirmationFor(action, user, nextRole);
+  if (question && !(await confirmDialog(question))) return;
+
+  if (action === 'delete') {
+    await deleteAccount(container, button, user);
+    return;
+  }
 
   const original = button.textContent;
   button.disabled = true;
@@ -330,12 +392,56 @@ async function perform(container, button, user, action, nextRole) {
       }
     );
 
+    // The live listener redraws the table; the message goes above it
     message = { kind: 'success', text: plan.summary };
-    await renderUsers(container);
+    draw(container);
   } catch (error) {
     message = { kind: 'danger', text: friendlyError(error) };
     button.disabled = false;
     button.textContent = original;
+    draw(container);
+  }
+}
+
+// ============================================================
+// DELETE
+//
+// Removes the users document, in the same batch as a user.delete entry
+// holding who the account belonged to. The entry's id is worked out from
+// the account's current lastAuditId (deleteAuditId in lib/audit.js), which
+// is how the rules find it, since a deleted document cannot point to it.
+//
+// The Firebase sign-in stays: removing it needs the Admin SDK, which the
+// free plan only allows from the Firebase console. If the person signs in
+// again, they arrive as a new pending request.
+// ============================================================
+
+async function deleteAccount(container, button, user) {
+  button.disabled = true;
+  button.textContent = 'Deleting...';
+
+  const summary = `Deleted the account of ${user.name} (${user.email})`;
+
+  try {
+    await auditedWrite(
+      [{ type: 'delete', collection: 'users', id: user.id }],
+      {
+        action: 'user.delete',
+        entity: 'users',
+        entityId: user.id,
+        before: { name: user.name, email: user.email, role: user.role },
+        after: null,
+        summary,
+      },
+      { auditId: deleteAuditId(user.id, user.lastAuditId) }
+    );
+
+    message = { kind: 'success', text: summary };
+    draw(container);
+  } catch (error) {
+    message = { kind: 'danger', text: friendlyError(error) };
+    button.disabled = false;
+    button.textContent = 'Delete';
     draw(container);
   }
 }

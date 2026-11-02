@@ -10,7 +10,12 @@
 // security rules deny it to a pending or disabled account anyway.
 
 import { render, $, esc, alertHtml, friendlyError } from '../lib/dom.js';
-import { signOutUser, resendVerification, refreshVerification } from '../lib/auth.js';
+import {
+  signOutUser,
+  resendVerification,
+  refreshVerification,
+  checkEmailVerified,
+} from '../lib/auth.js';
 import { currentUser } from '../lib/session.js';
 import { resetShell } from '../ui/shell.js';
 
@@ -42,9 +47,23 @@ function gateScreen({ kind, iconKey, title, text, email, actions }) {
 // Seen straight after registering, and by a pending account that signs in
 // later. There is no "check again" button: main.js listens to the account
 // (lib/accountWatch.js) and opens the app by itself once it is approved.
+//
+// An email and password account is also asked to confirm its address.
+// Google accounts arrive already confirmed, so they never see that part.
 // ============================================================
 
-export function pendingHtml(email) {
+// How often the screen asks Firebase whether the address has been
+// confirmed, and how long Resend stays switched off after it is used
+const VERIFY_CHECK_MS = 15000;
+const RESEND_PAUSE_MS = 60000;
+
+// The running check, so drawing the screen again never starts a second one
+let stopVerificationWatch = null;
+
+// user: { email, provider, emailVerified }
+export function pendingHtml(user) {
+  const email = user?.email || '';
+
   return gateScreen({
     kind: 'pending',
     iconKey: 'pending',
@@ -55,15 +74,108 @@ export function pendingHtml(email) {
       'open; it will open the app automatically.',
     email,
     actions: `
+      ${user?.provider === 'password' ? `<div id="cbVerifyArea">${verifyHtml(user)}</div>` : ''}
       <button type="button" class="cb-btn cb-btn-outline w-100" id="cbSignOut">
-        Sign out
-      </button>`,
+        Back to login
+      </button>
+      <p class="cb-help mt-2 mb-0">Approved later? Just sign in again.</p>`,
   });
 }
 
+// The verification lines, or the small check once the address is confirmed
+export function verifyHtml(user) {
+  if (user?.emailVerified) {
+    return `<p class="cb-gate-verified">&#10003; Email verified</p>`;
+  }
+
+  return `
+    <p class="cb-gate-note">
+      We also sent a verification link to <strong>${esc(user?.email || '')}</strong>.
+      Check your inbox and spam folder.
+    </p>
+    <p class="cb-gate-note">
+      <button type="button" class="cb-link-btn" id="cbResend">Resend verification email</button>
+    </p>`;
+}
+
 export function renderPending() {
-  const root = render('app', pendingHtml(currentUser()?.email));
+  const root = render('app', pendingHtml(currentUser()));
   wireCommon(root);
+
+  if (currentUser()?.provider !== 'password') return;
+
+  wireResend(root);
+  watchVerification();
+}
+
+function wireResend(root) {
+  $('#cbResend', root)?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+
+    try {
+      await resendVerification();
+      button.textContent = 'Sent';
+    } catch (error) {
+      // Firebase refuses repeated sends for a while; say so plainly
+      button.textContent = 'Could not send yet, try again in a minute';
+    }
+
+    setTimeout(() => {
+      if (!button.isConnected) return;
+      button.disabled = false;
+      button.textContent = 'Resend verification email';
+    }, RESEND_PAUSE_MS);
+  });
+}
+
+// Checks every 15 seconds, and as soon as the tab is looked at again, which
+// is when someone comes back from opening the link in their inbox. Stops
+// once the address is confirmed and recorded, or the screen is gone.
+function watchVerification() {
+  stopVerificationWatch?.();
+  let checking = false;
+
+  const check = async () => {
+    if (!document.getElementById('cbVerifyArea')) return stop();
+    if (checking) return;
+    checking = true;
+
+    try {
+      const verified = await checkEmailVerified();
+      if (verified) {
+        const area = document.getElementById('cbVerifyArea');
+        if (area) area.innerHTML = verifyHtml({ emailVerified: true });
+        stop();
+      }
+    } catch (error) {
+      // A dropped connection; the next check tries again
+      console.warn('Could not check email verification:', error);
+    } finally {
+      checking = false;
+    }
+  };
+
+  const onFocus = () => {
+    if (document.visibilityState === 'visible') check();
+  };
+
+  const timer = setInterval(check, VERIFY_CHECK_MS);
+  window.addEventListener('focus', onFocus);
+  document.addEventListener('visibilitychange', onFocus);
+
+  stopVerificationWatch = stop;
+
+  function stop() {
+    if (stopVerificationWatch === stop) stopVerificationWatch = null;
+    clearInterval(timer);
+    window.removeEventListener('focus', onFocus);
+    document.removeEventListener('visibilitychange', onFocus);
+  }
+
+  // Once straight away: the link may already have been opened, for example
+  // by someone who registered, confirmed, and only now signed in again
+  check();
 }
 
 // ============================================================
@@ -82,7 +194,7 @@ export function disabledHtml(email) {
     email,
     actions: `
       <button type="button" class="cb-btn cb-btn-outline w-100" id="cbSignOut">
-        Sign out
+        Back to login
       </button>`,
   });
 }

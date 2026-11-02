@@ -232,3 +232,11 @@ function cleanMessage(message) {
 
   return withoutUrls ? `${withoutUrls}.`.replace(/\.+$/, '.') : '';
 }
+
+// The name saved on a record about a person: a movement's loggedByName, an
+// audit entry's actorName. Records keep the name they were made with, so
+// they still read correctly after the person's account is deleted. Only a
+// record that saved no name at all falls back to this.
+export function personName(savedName) {
+  return savedName && String(savedName).trim() ? savedName : 'Deleted user';
+}

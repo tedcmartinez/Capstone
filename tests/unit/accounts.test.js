@@ -18,7 +18,7 @@ const account = (id, role, status = 'active') => ({ id, role, status });
 // The buttons offered, as a sorted list, for readable comparisons
 function offered(viewer, target) {
   const actions = accountActions(viewer, target);
-  return ['approve', 'reject', 'disable', 'enable', 'promote', 'demote'].filter((a) => actions[a]);
+  return ['approve', 'reject', 'disable', 'enable', 'promote', 'demote', 'remove'].filter((a) => actions[a]);
 }
 
 describe('a manager looking at other accounts', () => {
@@ -26,8 +26,12 @@ describe('a manager looking at other accounts', () => {
     expect(offered(manager, account('gm2', 'general_manager'))).toEqual(['disable', 'demote']);
   });
 
-  it('8. may re-enable a disabled manager, and demote them', () => {
-    expect(offered(manager, account('gm2', 'general_manager', 'disabled'))).toEqual(['enable', 'demote']);
+  it('is offered only Re-enable and Delete on a disabled manager', () => {
+    expect(offered(manager, account('gm2', 'general_manager', 'disabled'))).toEqual(['enable', 'remove']);
+  });
+
+  it('is offered only Re-enable and Delete on disabled staff', () => {
+    expect(offered(manager, account('s1', 'production_staff', 'disabled'))).toEqual(['enable', 'remove']);
   });
 
   it('8. is never offered promotion of staff', () => {
@@ -39,7 +43,9 @@ describe('a manager looking at other accounts', () => {
     expect(offered(manager, account('new', 'production_staff', 'pending'))).toEqual(['approve', 'reject']);
   });
 
-  it('9. is offered nothing on the webmaster', () => {
+  it('9. is offered nothing on the webmaster, not even Delete when disabled', () => {
+    expect(offered(manager, account('wm', 'webmaster', 'disabled'))).toEqual([]);
+
     const actions = accountActions(manager, account('wm', 'webmaster'));
 
     expect(offered(manager, account('wm', 'webmaster'))).toEqual([]);
@@ -60,8 +66,14 @@ describe('the webmaster looking at other accounts', () => {
     expect(offered(webmaster, account('new', 'production_staff', 'pending'))).toEqual(['approve', 'reject']);
   });
 
-  it('may re-enable any disabled account', () => {
-    expect(offered(webmaster, account('s1', 'production_staff', 'disabled'))).toEqual(['enable', 'promote']);
+  it('is offered only Re-enable and Delete on any disabled account, never a role change', () => {
+    expect(offered(webmaster, account('s1', 'production_staff', 'disabled'))).toEqual(['enable', 'remove']);
+    expect(offered(webmaster, account('gm', 'general_manager', 'disabled'))).toEqual(['enable', 'remove']);
+  });
+
+  it('is never offered Delete on an active or pending account', () => {
+    expect(accountActions(webmaster, account('s1', 'production_staff')).remove).toBe(false);
+    expect(accountActions(webmaster, account('new', 'production_staff', 'pending')).remove).toBe(false);
   });
 });
 

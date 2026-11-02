@@ -13,6 +13,7 @@ const routes = [];
 let notFoundHandler = null;
 let beforeEach = null;
 let readyCheck = null;
+let leaveHandlers = [];
 
 // Registers a route. The pattern is a plain path, optionally ending in /:id
 // for the one case that needs it.
@@ -45,6 +46,25 @@ export function setGuard(handler) {
 // past it either.
 export function setReady(handler) {
   readyCheck = handler;
+}
+
+// Something a page started that must stop when the page is left, such as a
+// live listener. Run before the next route is drawn, and also by
+// leavePage() when a gate screen replaces the app.
+export function onLeave(handler) {
+  leaveHandlers.push(handler);
+}
+
+export function leavePage() {
+  const handlers = leaveHandlers;
+  leaveHandlers = [];
+  for (const handler of handlers) {
+    try {
+      handler();
+    } catch (error) {
+      console.warn('A page clean-up failed:', error);
+    }
+  }
 }
 
 // ============================================================
@@ -145,6 +165,9 @@ export async function resolve() {
       return resolve();
     }
   }
+
+  // The page being left stops anything it started
+  leavePage();
 
   const found = match(currentPath());
 

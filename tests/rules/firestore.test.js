@@ -741,6 +741,220 @@ describe('nobody may change their own role or status', () => {
 });
 
 // ============================================================
+// ROLES CHANGE ONLY ON ACTIVE ACCOUNTS
+// ============================================================
+
+describe('role changes need an active account', () => {
+  beforeEach(async () => {
+    await seedWebmaster();
+    await seedActiveGM(env, 'uid_gm');
+  });
+
+  it('nobody changes the role of a disabled account', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+    await seedUser(env, 'uid_offgm', { role: 'general_manager', status: 'disabled' });
+
+    await assertFails(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_off'], { role: 'general_manager' })
+    );
+    await assertFails(
+      auditedUpdate(asGM(), 'uid_gm', ['users', 'uid_offgm'], { role: 'production_staff' })
+    );
+  });
+
+  it('nobody changes the role of a pending account', async () => {
+    await seedPendingStaff(env, 'uid_new');
+
+    await assertFails(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_new'], { role: 'general_manager' })
+    );
+  });
+
+  it('re-enabling and changing the role in one write is refused', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+
+    await assertFails(
+      auditedUpdate(asWM(), 'uid_webmaster', ['users', 'uid_off'], {
+        status: 'active',
+        role: 'general_manager',
+      })
+    );
+  });
+});
+
+// ============================================================
+// DELETING ACCOUNTS
+//
+// Only disabled accounts, never your own, never the webmaster's, only by a
+// manager or the webmaster, and only with a user.delete audit entry named
+// after the account's current lastAuditId.
+// ============================================================
+
+// The same id deleteAuditId() in src/lib/audit.js builds. Seeded users all
+// carry lastAuditId 'seed'.
+const deleteLogId = (uid, lastAuditId = 'seed') => `user-delete-${uid}-${lastAuditId}`;
+
+function auditedDelete(db, actorUid, uid, options = {}) {
+  const logId = options.logId || deleteLogId(uid);
+  const batch = writeBatch(db);
+
+  batch.delete(doc(db, 'users', uid));
+
+  if (options.skipLog !== true) {
+    batch.set(
+      doc(db, 'audit_logs', logId),
+      auditEntry(actorUid, {
+        action: 'user.delete',
+        entity: 'users',
+        entityId: uid,
+        ...options.auditOverrides,
+      })
+    );
+  }
+
+  return batch.commit();
+}
+
+describe('deleting accounts', () => {
+  beforeEach(async () => {
+    await seedWebmaster();
+    await seedActiveGM(env, 'uid_gm');
+  });
+
+  it('a manager may delete a disabled staff account', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+
+    await assertSucceeds(auditedDelete(asGM(), 'uid_gm', 'uid_off'));
+  });
+
+  it('a manager may delete a disabled manager account', async () => {
+    await seedUser(env, 'uid_offgm', { role: 'general_manager', status: 'disabled' });
+
+    await assertSucceeds(auditedDelete(asGM(), 'uid_gm', 'uid_offgm'));
+  });
+
+  it('the webmaster may delete any disabled account', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+    await seedUser(env, 'uid_offgm', { role: 'general_manager', status: 'disabled' });
+
+    await assertSucceeds(auditedDelete(asWM(), 'uid_webmaster', 'uid_off'));
+    await assertSucceeds(auditedDelete(asWM(), 'uid_webmaster', 'uid_offgm'));
+  });
+
+  it('an active or pending account cannot be deleted', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+    await seedPendingStaff(env, 'uid_new');
+
+    await assertFails(auditedDelete(asWM(), 'uid_webmaster', 'uid_staff'));
+    await assertFails(auditedDelete(asGM(), 'uid_gm', 'uid_new'));
+  });
+
+  it('nobody deletes their own account', async () => {
+    await assertFails(auditedDelete(asGM(), 'uid_gm', 'uid_gm'));
+    await assertFails(auditedDelete(asWM(), 'uid_webmaster', 'uid_webmaster'));
+  });
+
+  it('the webmaster account can never be deleted, even if marked disabled', async () => {
+    await seedUser(env, 'uid_webmaster', {
+      role: 'webmaster',
+      email: WEBMASTER_EMAIL,
+      status: 'disabled',
+    });
+
+    await assertFails(auditedDelete(asGM(), 'uid_gm', 'uid_webmaster'));
+  });
+
+  it('staff cannot delete anyone', async () => {
+    await seedActiveStaff(env, 'uid_staff');
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+
+    const db = asUser(env, 'uid_staff', 'staff@example.com');
+    await assertFails(auditedDelete(db, 'uid_staff', 'uid_off'));
+  });
+
+  it('a delete without its audit entry is refused', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+
+    await assertFails(auditedDelete(asGM(), 'uid_gm', 'uid_off', { skipLog: true }));
+  });
+
+  it('the entry must carry the expected name, action and account', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+
+    // A random name the rules cannot connect to this account
+    await assertFails(auditedDelete(asGM(), 'uid_gm', 'uid_off', { logId: nextAuditId() }));
+
+    // The right name, but describing something else
+    await assertFails(
+      auditedDelete(asGM(), 'uid_gm', 'uid_off', { auditOverrides: { action: 'user.disable' } })
+    );
+    await assertFails(
+      auditedDelete(asGM(), 'uid_gm', 'uid_off', { auditOverrides: { entityId: 'uid_someone' } })
+    );
+  });
+
+  it('an existing entry cannot be reused for a delete', async () => {
+    await seedUser(env, 'uid_off', { role: 'production_staff', status: 'disabled' });
+    await seedDoc(env, 'audit_logs', deleteLogId('uid_off'), {
+      action: 'user.delete',
+      entityId: 'uid_off',
+    });
+
+    // The entry already exists, so it proves nothing about this delete
+    const db = asGM();
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'users', 'uid_off'));
+    await assertFails(batch.commit());
+  });
+
+  it('a deleted person may register again as a new pending request', async () => {
+    await seedUser(env, 'uid_off', {
+      role: 'production_staff',
+      status: 'disabled',
+      email: 'back@example.com',
+    });
+    await assertSucceeds(auditedDelete(asGM(), 'uid_gm', 'uid_off'));
+
+    const db = asUser(env, 'uid_off', 'back@example.com');
+    await assertSucceeds(
+      auditedSet(db, 'uid_off', ['users', 'uid_off'], {
+        name: 'Back Again',
+        email: 'back@example.com',
+        role: 'production_staff',
+        status: 'pending',
+      })
+    );
+  });
+});
+
+// ============================================================
+// THE VERIFIED FLAG FOLLOWS THE TOKEN
+// ============================================================
+
+describe('emailVerified on your own account', () => {
+  it('may be set true when the sign-in token says the address is verified', async () => {
+    await seedUser(env, 'uid_new', { status: 'pending', emailVerified: false });
+    const db = asUser(env, 'uid_new', 'new@example.com', true);
+
+    await assertSucceeds(auditedUpdate(db, 'uid_new', ['users', 'uid_new'], { emailVerified: true }));
+  });
+
+  it('may not be set true while the token says it is not', async () => {
+    await seedUser(env, 'uid_new', { status: 'pending', emailVerified: false });
+    const db = asUser(env, 'uid_new', 'new@example.com', false);
+
+    await assertFails(auditedUpdate(db, 'uid_new', ['users', 'uid_new'], { emailVerified: true }));
+  });
+
+  it('other profile edits are unaffected by the token', async () => {
+    await seedUser(env, 'uid_new', { status: 'pending', emailVerified: false });
+    const db = asUser(env, 'uid_new', 'new@example.com', false);
+
+    await assertSucceeds(auditedUpdate(db, 'uid_new', ['users', 'uid_new'], { name: 'New Name' }));
+  });
+});
+
+// ============================================================
 // 10 and 11. THE AUDIT TRAIL CANNOT BE AVOIDED OR ALTERED
 // ============================================================
 
