@@ -1,0 +1,722 @@
+/* Cornerblock Inventory, styles that exist only in the cloud version.
+   style.css is the original brand stylesheet and is kept byte for byte
+   as it was in the LAN version, so anything new goes here instead.
+   All colors below come from the design tokens defined in style.css.
+
+   Sections:
+     1. Boot screen (shown while Firebase decides who is signed in)
+     2. Account gate screens (pending approval, account disabled)
+*/
+
+/* ============================================================
+   1. BOOT SCREEN
+   The app cannot know the signed-in user's role until Firebase
+   Auth answers, which takes a moment on a cold load. This screen
+   fills that gap so the page never flashes the wrong view first.
+   ============================================================ */
+
+.cb-boot {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background-color: var(--cb-bg);
+}
+
+.cb-boot-mark {
+    width: 54px;
+    height: 54px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--cb-radius);
+    background-color: var(--cb-brown);
+    color: var(--cb-orange);
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+.cb-boot-text {
+    margin: 0;
+    color: var(--cb-muted);
+    font-size: 14px;
+}
+
+/* ============================================================
+   2. ACCOUNT GATE SCREENS
+   A newly registered account is 'pending' until the general
+   manager approves it, and can be set back to 'disabled' later.
+   Neither state may see any inventory data, so both get this
+   standalone centered card instead of the normal app shell.
+   ============================================================ */
+
+.cb-gate {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background-color: var(--cb-bg);
+}
+
+.cb-gate-card {
+    width: 100%;
+    max-width: 440px;
+    padding: 36px 32px;
+    text-align: center;
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: var(--cb-shadow);
+}
+
+.cb-gate-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+}
+
+.cb-gate-icon.is-pending {
+    background-color: var(--cb-amber-bg);
+    color: var(--cb-amber);
+}
+
+.cb-gate-icon.is-disabled {
+    background-color: var(--cb-red-bg);
+    color: var(--cb-red);
+}
+
+.cb-gate-title {
+    margin: 0 0 8px;
+    color: var(--cb-brown);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.cb-gate-text {
+    margin: 0 0 22px;
+    color: var(--cb-muted);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.cb-gate-email {
+    display: block;
+    margin-bottom: 22px;
+    color: var(--cb-text);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* The verification lines on the Request sent screen */
+.cb-gate-note {
+    margin: 0 0 12px;
+    color: var(--cb-muted);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.cb-gate-verified {
+    margin: 0 0 16px;
+    color: var(--cb-green);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* ============================================================
+   3. TABLE CELL EMPHASIS
+   The first column of a table is the record's name, shown a
+   little stronger than the detail columns beside it.
+   ============================================================ */
+
+.cb-cell-strong {
+    color: var(--cb-text);
+    font-weight: 600;
+}
+
+/* ============================================================
+   4. TABS
+   Used by the Users page to separate pending, active and
+   disabled accounts, and later by the reports pages. Styled to
+   match the sidebar's active-link treatment: an orange rule
+   under the selected tab rather than a filled pill.
+   ============================================================ */
+
+.cb-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.cb-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 14px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--cb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cb-tab:hover {
+    color: var(--cb-text);
+}
+
+.cb-tab.is-active {
+    color: var(--cb-orange-dark);
+    border-bottom-color: var(--cb-orange);
+}
+
+.cb-tab-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background-color: var(--cb-divider);
+    color: var(--cb-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.cb-tab.is-active .cb-tab-count {
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+}
+
+/* ============================================================
+   5. LOGIN PAGE ADDITIONS
+   The LAN version had one password form. The cloud version adds
+   a Register tab, because employees now sign themselves up, and
+   a Google button. Everything else on the login card is
+   unchanged from the original stylesheet.
+   ============================================================ */
+
+.cb-auth-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid var(--cb-border);
+}
+
+.cb-auth-tab {
+    flex: 1;
+    padding: 10px 8px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--cb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cb-auth-tab:hover {
+    color: var(--cb-text);
+}
+
+.cb-auth-tab.is-active {
+    color: var(--cb-orange-dark);
+    border-bottom-color: var(--cb-orange);
+}
+
+/* A horizontal rule with the word "or" sitting in the middle */
+.cb-auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0;
+    color: var(--cb-faint);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.cb-auth-divider::before,
+.cb-auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background-color: var(--cb-border);
+}
+
+/* A button that reads as a link, for "Forgot your password?" */
+.cb-link-btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--cb-orange-dark);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.cb-link-btn:hover {
+    color: var(--cb-brown);
+}
+
+/* ============================================================
+   6. CARD FOOTER
+   The strip below a paginated table holding the Previous and
+   Next buttons. Matches the card header's treatment, a divider
+   above and the same padding, so the card reads as one piece.
+   ============================================================ */
+
+.cb-card-foot {
+    padding: 14px 20px;
+    border-top: 1px solid var(--cb-divider);
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.cb-card-foot .cb-help {
+    max-width: 60ch;
+}
+
+/* ============================================================
+   7. SYNC BANNER
+   Sits under the top bar when an entry is waiting to reach the
+   server, or has been refused by it. The failed state is red
+   and cannot be missed, because the entry has to be made again.
+   ============================================================ */
+
+.cb-sync-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--cb-border);
+    font-size: 13px;
+}
+
+.cb-sync-banner.is-pending {
+    background-color: var(--cb-amber-bg);
+    color: var(--cb-amber);
+}
+
+.cb-sync-banner.is-failed {
+    background-color: var(--cb-red-bg);
+    color: var(--cb-red);
+}
+
+.cb-sync-text {
+    flex: 1;
+    line-height: 1.6;
+}
+
+.cb-sync-list {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}
+
+.cb-sync-list li {
+    margin-bottom: 4px;
+}
+
+.cb-sync-what {
+    display: block;
+    font-weight: 600;
+    color: var(--cb-text);
+}
+
+.cb-sync-why {
+    display: block;
+    color: var(--cb-muted);
+    font-size: 12px;
+}
+
+@media print {
+    .cb-sync-banner { display: none; }
+}
+
+/* ============================================================
+   8. ADJUSTMENT BADGE
+   A third movement kind, alongside the existing IN and OUT
+   badges in style.css. Brown rather than green or red, because
+   an adjustment is neither a delivery nor a withdrawal: it is a
+   correction to the record.
+   ============================================================ */
+
+.cb-move.is-adjust {
+    background-color: var(--cb-orange-soft);
+    color: var(--cb-orange-dark);
+}
+
+/* ============================================================
+   9. ALERT WRAPPING
+   The alert strip in style.css is a flex row, which lets a long
+   unbroken string, such as a URL inside an error message, push
+   the layout past the edge of the page. These rules keep any
+   message inside the box however it is worded.
+
+   friendlyError() in lib/dom.js also strips URLs out of error
+   text, so the two work together: the message is shortened,
+   and whatever remains wraps.
+   ============================================================ */
+
+.cb-alert {
+    /* A flex item will not shrink below its content without this */
+    min-width: 0;
+    align-items: flex-start;
+}
+
+.cb-alert > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.cb-alert svg {
+    flex: 0 0 auto;
+}
+
+/* ============================================================
+   10. AUDIT TRAIL DETAIL
+   The entry's facts as a two column list, and the before and
+   after comparison beneath it. A changed field is tinted so the
+   eye goes straight to what actually moved.
+   ============================================================ */
+
+.cb-detail-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 18px;
+    margin: 0;
+    font-size: 13px;
+}
+
+.cb-detail-list dt {
+    color: var(--cb-muted);
+    font-weight: 600;
+}
+
+.cb-detail-list dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.cb-detail-list dd .text-muted {
+    margin-left: 6px;
+}
+
+.cb-diff td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.cb-diff .cb-diff-arrow {
+    width: 1%;
+    color: var(--cb-faint);
+    text-align: center;
+}
+
+.cb-diff .cb-diff-before {
+    color: var(--cb-muted);
+}
+
+.cb-diff tr.is-changed .cb-diff-before {
+    color: var(--cb-red);
+    text-decoration: line-through;
+    text-decoration-color: rgba(185, 28, 28, 0.4);
+}
+
+.cb-diff tr.is-changed .cb-diff-after {
+    color: var(--cb-green);
+    font-weight: 600;
+}
+
+/* ============================================================
+   11. USERS TABLE
+   Six columns, several holding badges, on a normal desktop
+   width without a sideways scrollbar. The name always shows in
+   full and wraps if it must; a long email is cut short with an
+   ellipsis instead, and the full address is in its tooltip.
+   ============================================================ */
+
+.cb-users-table tbody td {
+    padding-left: 12px;
+    padding-right: 12px;
+}
+
+.cb-users-name {
+    min-width: 150px;
+}
+
+.cb-users-email {
+    max-width: 260px;
+}
+
+.cb-users-email .cb-badge {
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.cb-truncate {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.cb-users-email .cb-truncate {
+    max-width: 190px;
+}
+
+.cb-users-table .cb-row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* ============================================================
+   12. STOCK FORM
+   The required marker, the message under a field that still
+   needs something, and the searchable material picker.
+   ============================================================ */
+
+.cb-required {
+    margin-left: 2px;
+    color: var(--cb-red);
+    font-weight: 700;
+}
+
+.cb-field-error {
+    margin-top: 4px;
+    color: var(--cb-red);
+    font-size: 12.5px;
+}
+
+.cb-field-error:empty {
+    display: none;
+}
+
+.cb-picker {
+    position: relative;
+}
+
+.cb-picker-list {
+    position: absolute;
+    z-index: 1060;
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    overflow-y: auto;
+    list-style: none;
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: 0 8px 24px rgba(65, 33, 24, 0.12);
+}
+
+.cb-picker-option {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.cb-picker-option.is-active,
+.cb-picker-option:hover {
+    background-color: var(--cb-hover);
+}
+
+.cb-picker-option[aria-selected="true"] .cb-picker-name {
+    color: var(--cb-orange-dark);
+}
+
+.cb-picker-option[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.cb-picker-name {
+    font-weight: 600;
+    font-size: 13.5px;
+}
+
+.cb-picker-meta {
+    color: var(--cb-muted);
+    font-size: 12px;
+}
+
+.cb-picker-empty {
+    padding: 8px 12px;
+    color: var(--cb-muted);
+    font-size: 13px;
+}
+
+/* ============================================================
+   13. SORTABLE HEADERS
+   style.css drew a sortable heading as a button, which the
+   browser then gave a border and grey background, so those
+   columns looked boxed next to plain ones like DETAILS. These
+   rules make the button look exactly like the plain heading
+   text around it, with a small arrow. The focus ring shows for
+   keyboard focus only.
+   ============================================================ */
+
+.cb-table thead th .cb-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+}
+
+.cb-table thead th .cb-sort:hover,
+.cb-table thead th .cb-sort.is-active {
+    color: var(--cb-text);
+}
+
+.cb-table thead th .cb-sort:focus {
+    outline: none;
+}
+
+.cb-table thead th .cb-sort:focus-visible {
+    outline: 2px solid var(--cb-orange);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
+.cb-table thead th .cb-sort-arrow {
+    font-size: 8px;
+    opacity: 0.9;
+}
+
+.cb-table thead th .cb-sort-arrow.is-idle {
+    opacity: 0.3;
+    letter-spacing: -1px;
+}
+
+.cb-table thead th.cb-num .cb-sort {
+    justify-content: flex-end;
+}
+
+/* ============================================================
+   14. DATE RANGE FILTER
+   From and To on one row with the other filters, labelled,
+   with the five presets beside them.
+   ============================================================ */
+
+.cb-daterange {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px 10px;
+}
+
+.cb-daterange-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cb-daterange-label {
+    color: var(--cb-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.cb-daterange-field .cb-input {
+    width: 150px;
+}
+
+.cb-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cb-preset {
+    padding: 6px 10px;
+    border: 1px solid var(--cb-border);
+    border-radius: 999px;
+    background-color: var(--cb-surface);
+    color: var(--cb-muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.cb-preset:hover {
+    color: var(--cb-text);
+}
+
+.cb-preset.is-active {
+    border-color: var(--cb-orange);
+    background-color: var(--cb-orange);
+    color: #fff;
+}
+
+.cb-preset:focus-visible {
+    outline: 2px solid var(--cb-orange);
+    outline-offset: 2px;
+}
+
+.cb-daterange-error {
+    flex-basis: 100%;
+}
+
+/* Filter rows hold labelled fields now, so they line up along the bottom */
+.cb-filters {
+    align-items: flex-end;
+}
+
+/* ============================================================
+   15. MATERIALS TABLE
+   Most material names are long ("Marine Plywood 3/4 x 4 x 8
+   ft"), and wrapped onto three or four lines while Size and
+   Unit kept room they did not need. The name gets the room;
+   size and unit stay on one short line.
+   ============================================================ */
+
+.cb-materials-table .cb-col-name {
+    min-width: 260px;
+}
+
+.cb-materials-table td:nth-child(3),
+.cb-materials-table td:nth-child(4) {
+    white-space: nowrap;
+    width: 1%;
+}
+
+/* The movement filters: a narrower project box than the search */
+.cb-filter-project {
+    width: 180px;
+}
+
+/* The login page carries the system's full name under the logo */
+.cb-login-tag {
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.45;
+}

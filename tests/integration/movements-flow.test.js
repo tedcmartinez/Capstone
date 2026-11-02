@@ -1,0 +1,621 @@
+// Stock movements, end to end
+//
+// The point of these is the arithmetic and the audit trail: that a movement
+// writes the quantity it claims, that the material's running total follows,
+// that both land together or not at all, and that the server refuses a
+// withdrawal larger than the stock on hand even if the browser is talked
+// into asking for one.
+
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { withRequirements } from './requirements.js';
+
+globalThis.__CORNERBLOCK_USE_EMULATORS__ = true;
+
+const PROJECT_ID = 'cornerblock-inventory';
+const OWNER = { Authorization: 'Bearer owner' };
+
+let auth;
+let authLib;
+let session;
+let materialsLib;
+let movementsLib;
+let firebaseAuth;
+
+beforeAll(async () => {
+  process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
+  process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
+
+  const firebaseModule = await import('../../app-firebase/src/lib/firebase.js');
+  auth = firebaseModule.auth;
+
+  firebaseAuth = await import('firebase/auth');
+  authLib = await import('../../app-firebase/src/lib/auth.js');
+  session = await import('../../app-firebase/src/lib/session.js');
+  materialsLib = await import('../../app-firebase/src/lib/materials.js');
+  // logMovement() fills in the receipt and project every new movement
+  // needs, unless the test gives its own (see requirements.js)
+  const movementsModule = await import('../../app-firebase/src/lib/movements.js');
+  movementsLib = {
+    ...movementsModule,
+    logMovement: (args) => movementsModule.logMovement(withRequirements(args)),
+  };
+});
+
+afterAll(async () => {
+  await auth.signOut().catch(() => {});
+});
+
+beforeEach(async () => {
+  await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${PROJECT_ID}/accounts`, {
+    method: 'DELETE',
+  });
+  await fetch(
+    `http://127.0.0.1:8080/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`,
+    { method: 'DELETE' }
+  );
+  await auth.signOut().catch(() => {});
+  session.clearCurrentUser();
+
+  await seedMaterial('m1', { name: 'Mahogany Plank', stock: 18, threshold: 30, unit: 'pcs' });
+});
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+async function seed(path, fields) {
+  const [collectionName, id] = path.split('/');
+  await fetch(
+    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionName}?documentId=${id}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...OWNER },
+      body: JSON.stringify({ fields }),
+    }
+  );
+}
+
+function seedMaterial(id, { name, stock, threshold, unit }) {
+  return seed(`materials/${id}`, {
+    name: { stringValue: name },
+    category: { stringValue: 'wood' },
+    unit: { stringValue: unit },
+    size: { stringValue: '' },
+    stockQuantity: { integerValue: String(stock) },
+    minThreshold: { integerValue: String(threshold) },
+    notes: { stringValue: '' },
+    isArchived: { booleanValue: false },
+    lastAuditId: { stringValue: 'seed' },
+  });
+}
+
+async function fetchDoc(path) {
+  const response = await fetch(
+    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/${path}`,
+    { headers: OWNER }
+  );
+  if (!response.ok) return null;
+  return (await response.json()).fields || null;
+}
+
+async function listCollection(name) {
+  const response = await fetch(
+    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/${name}`,
+    { headers: OWNER }
+  );
+  if (!response.ok) return [];
+  return (await response.json()).documents || [];
+}
+
+// Writes resolve against the cache first, so the server copy is polled
+async function waitFor(check, { attempts = 40, interval = 50 } = {}) {
+  for (let i = 0; i < attempts; i += 1) {
+    const result = await check();
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  return null;
+}
+
+const waitForDoc = (path) => waitFor(() => fetchDoc(path));
+
+async function waitForAudit(action) {
+  return waitFor(async () => {
+    const docs = await listCollection('audit_logs');
+    const found = docs.find((d) => d.fields?.action?.stringValue === action);
+    return found || null;
+  });
+}
+
+async function signInAs(email, role) {
+  const credential = await firebaseAuth.createUserWithEmailAndPassword(auth, email, 'Password2026');
+
+  await seed(`users/${credential.user.uid}`, {
+    name: { stringValue: role === 'general_manager' ? 'Shop Manager' : 'Juan Dela Cruz' },
+    email: { stringValue: email },
+    role: { stringValue: role },
+    status: { stringValue: 'active' },
+    provider: { stringValue: 'password' },
+    emailVerified: { booleanValue: true },
+    lastAuditId: { stringValue: 'seed' },
+  });
+
+  await authLib.bootstrapUser(credential.user, 'password');
+  return credential.user.uid;
+}
+
+function number(field) {
+  if (!field) return null;
+  return Number(field.integerValue ?? field.doubleValue);
+}
+
+// ============================================================
+// LOGGING A MOVEMENT
+// ============================================================
+
+// ============================================================
+// NOTHING IS QUEUED THAT THE SERVER WOULD REFUSE
+//
+// The receipt, project and notes requirements are checked before the batch
+// is built, so an entry missing one is stopped on screen and never sits in
+// the offline queue waiting to fail. receipt: null and project: '' are
+// passed explicitly, so the test helper does not fill them in.
+// ============================================================
+
+describe('round 2 requirements, checked before anything is written', () => {
+  async function movementCount() {
+    const response = await fetch(
+      `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/stock_movements`,
+      { headers: OWNER }
+    );
+    return ((await response.json()).documents || []).length;
+  }
+
+  it('refuses a stock-in with no receipt photo', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'in', material, quantity: '5', reason: 'Purchase', receipt: null })
+    ).rejects.toThrow('Attach a photo of the delivery receipt.');
+    expect(await movementCount()).toBe(0);
+  });
+
+  it('refuses a stock-out with no project unless it is Damaged', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'out', material, quantity: '1', reason: 'Transfer', project: '' })
+    ).rejects.toThrow('Enter the project these materials are for.');
+    expect(await movementCount()).toBe(0);
+
+    await movementsLib.logMovement({ type: 'out', material, quantity: '1', reason: 'Damaged', project: '' });
+    expect(await movementCount()).toBe(1);
+  });
+
+  it('saves the project with its search key', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'out',
+      material,
+      quantity: '1',
+      reason: 'Project Usage',
+      project: '  Sofa   Set for Ms. Reyes ',
+    });
+
+    const saved = await fetchDoc(`stock_movements/${movementId}`);
+    expect(saved.project.stringValue).toBe('Sofa   Set for Ms. Reyes');
+    expect(saved.projectKey.stringValue).toBe('sofa set for ms. reyes');
+  });
+
+  it('refuses Other without an explanation in the notes', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'out', material, quantity: '1', reason: 'Other', notes: 'hm' })
+    ).rejects.toThrow('Explain the reason for this stock-out.');
+    expect(await movementCount()).toBe(0);
+  });
+});
+
+describe('logging a stock-in', () => {
+  it('writes the movement and raises the material total together', async () => {
+    const uid = await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'in',
+      material,
+      quantity: '50',
+      reason: 'Purchase',
+      reference: 'PO-1042',
+      notes: 'Delivered in the afternoon',
+    });
+
+    const movement = await waitForDoc(`stock_movements/${movementId}`);
+    expect(movement.type.stringValue).toBe('in');
+    expect(number(movement.quantity)).toBe(50);
+    expect(number(movement.beforeQty)).toBe(18);
+    expect(number(movement.afterQty)).toBe(68);
+    expect(movement.loggedBy.stringValue).toBe(uid);
+    expect(movement.loggedByName.stringValue).toBe('Juan Dela Cruz');
+
+    // The running total on the material follows in the same batch
+    const updated = await waitFor(async () => {
+      const fields = await fetchDoc('materials/m1');
+      return number(fields.stockQuantity) === 68 ? fields : null;
+    });
+    expect(number(updated.stockQuantity)).toBe(68);
+  });
+
+  it('keeps reason, reference and notes as three separate fields', async () => {
+    // The LAN version joined these into one notes column with pipes, which
+    // made them unreadable as data. They are split out now.
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'in',
+      material,
+      quantity: '10',
+      reason: 'Purchase',
+      reference: 'PO-1042',
+      notes: 'Delivered late',
+    });
+
+    const movement = await waitForDoc(`stock_movements/${movementId}`);
+    expect(movement.reason.stringValue).toBe('Purchase');
+    expect(movement.reference.stringValue).toBe('PO-1042');
+    expect(movement.notes.stringValue).toBe('Delivered late');
+  });
+
+  it('stamps today as the date rather than taking one from the form', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'in',
+      material,
+      quantity: '1',
+      reason: 'Purchase',
+    });
+
+    const movement = await waitForDoc(`stock_movements/${movementId}`);
+    const today = new Date();
+    const expected = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    expect(movement.movementDate.stringValue).toBe(expected);
+  });
+
+  it('records a readable summary in the audit trail', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await movementsLib.logMovement({
+      type: 'out',
+      material,
+      quantity: '5',
+      reason: 'Project Usage',
+      project: 'order #102',
+    });
+
+    const entry = await waitForAudit('stock.out');
+    expect(entry).not.toBeNull();
+    expect(entry.fields.summary.stringValue).toBe(
+      'Stock out 5 pcs, Mahogany Plank (Project Usage: order #102)'
+    );
+    expect(number(entry.fields.before.mapValue.fields.stockQuantity)).toBe(18);
+    expect(number(entry.fields.after.mapValue.fields.stockQuantity)).toBe(13);
+  });
+});
+
+// ============================================================
+// 12. STOCK CANNOT GO BELOW ZERO
+// ============================================================
+
+describe('12. withdrawing more than is on hand', () => {
+  it('is refused before anything is written', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'out', material, quantity: '25', reason: 'Damaged' })
+    ).rejects.toThrow(/Cannot remove more than the 18 pcs/);
+
+    // Nothing was recorded and the total is untouched
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(await listCollection('stock_movements')).toEqual([]);
+    expect(number((await fetchDoc('materials/m1')).stockQuantity)).toBe(18);
+  });
+
+  it('is refused by the server too, not only by the browser check', async () => {
+    // This goes around logMovement() and writes the batch by hand with a
+    // negative afterQty, which is what a tampered browser would do. The
+    // rules are what stop it, so this is the check that actually matters.
+    const uid = await signInAs('staff@example.com', 'production_staff');
+
+    const { doc, writeBatch, serverTimestamp, collection } = await import('firebase/firestore');
+    const { db } = await import('../../app-firebase/src/lib/firebase.js');
+
+    const auditId = doc(collection(db, 'audit_logs')).id;
+    const movementId = doc(collection(db, 'stock_movements')).id;
+    const batch = writeBatch(db);
+
+    batch.set(doc(db, 'stock_movements', movementId), {
+      materialId: 'm1',
+      materialName: 'Mahogany Plank',
+      type: 'out',
+      quantity: 25,
+      beforeQty: 18,
+      afterQty: -7,
+      movementDate: '2026-10-31',
+      reason: 'Damaged',
+      reference: '',
+      notes: '',
+      receiptId: null,
+      loggedBy: uid,
+      loggedByName: 'Juan Dela Cruz',
+      createdAt: serverTimestamp(),
+      lastAuditId: auditId,
+    });
+    batch.update(doc(db, 'materials', 'm1'), {
+      stockQuantity: -7,
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+      lastAuditId: auditId,
+    });
+    batch.set(doc(db, 'audit_logs', auditId), {
+      action: 'stock.out',
+      entity: 'stock_movements',
+      entityId: movementId,
+      actorUid: uid,
+      actorEmail: 'staff@example.com',
+      actorName: 'Juan Dela Cruz',
+      actorRole: 'production_staff',
+      summary: 'Tampered withdrawal',
+      timestamp: serverTimestamp(),
+      appVersion: '2.0.0',
+    });
+
+    let rejected = false;
+    try {
+      await batch.commit();
+    } catch (error) {
+      rejected = true;
+      expect(String(error)).toMatch(/permission|insufficient/i);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // Whether the refusal arrived as an exception or as a rollback, the
+    // outcome must be the same: nothing written, total unchanged.
+    expect(await fetchDoc(`stock_movements/${movementId}`)).toBeNull();
+    expect(number((await fetchDoc('materials/m1')).stockQuantity)).toBe(18);
+  });
+
+  it('allows a withdrawal down to exactly zero', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'out',
+      material,
+      quantity: '18',
+      reason: 'Project Usage',
+    });
+
+    const movement = await waitForDoc(`stock_movements/${movementId}`);
+    expect(number(movement.afterQty)).toBe(0);
+
+    const updated = await waitFor(async () => {
+      const fields = await fetchDoc('materials/m1');
+      return number(fields.stockQuantity) === 0 ? fields : null;
+    });
+    expect(number(updated.stockQuantity)).toBe(0);
+  });
+});
+
+// ============================================================
+// HISTORY IS PERMANENT
+// ============================================================
+
+// ============================================================
+// ROUND 2: CATEGORY, PROJECT AND KEYWORD FILTERS
+//
+// Type, material and dates are applied by the Firestore query; category,
+// project and keyword are checked in the browser while paging. These run
+// the real queries with the real rules, through loadMovements() and the
+// export's loadAllMovements().
+// ============================================================
+
+describe('history filters checked while paging', () => {
+  async function history() {
+    await signInAs('staff@example.com', 'production_staff');
+    await seed('materials/m2', {
+      name: { stringValue: 'Contact Cement' },
+      category: { stringValue: 'adhesives' },
+      unit: { stringValue: 'can' },
+      size: { stringValue: '' },
+      stockQuantity: { integerValue: '20' },
+      minThreshold: { integerValue: '2' },
+      notes: { stringValue: '' },
+      isArchived: { booleanValue: false },
+      lastAuditId: { stringValue: 'seed' },
+    });
+
+    const find = async (id) => (await materialsLib.loadCatalog()).materials.find((m) => m.id === id);
+
+    await movementsLib.logMovement({
+      type: 'out', material: await find('m1'), quantity: '2', reason: 'Project Usage', project: 'Sofa set for Ms. Reyes',
+    });
+    await movementsLib.logMovement({
+      type: 'out', material: await find('m2'), quantity: '1', reason: 'Project Usage', project: 'Dining table',
+    });
+    await movementsLib.logMovement({
+      type: 'in', material: await find('m2'), quantity: '5', reason: 'Purchase', notes: 'urgent restock',
+    });
+
+    await waitFor(async () => {
+      const all = await movementsLib.loadMovements({});
+      return all.movements.length === 3 ? all : null;
+    });
+  }
+
+  const names = (page) => page.movements.map((m) => m.project || m.reason).sort();
+
+  it('filters by category', async () => {
+    await history();
+    const page = await movementsLib.loadMovements({
+      match: movementsLib.movementMatcher({ materialIds: new Set(['m2']) }),
+    });
+    expect(names(page)).toEqual(['Dining table', 'Purchase']);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it('filters by the start of a project name, any case', async () => {
+    await history();
+    const page = await movementsLib.loadMovements({
+      match: movementsLib.movementMatcher({ project: 'SOFA' }),
+    });
+    expect(names(page)).toEqual(['Sofa set for Ms. Reyes']);
+  });
+
+  it('combines a browser-side filter with an indexed one', async () => {
+    await history();
+    const page = await movementsLib.loadMovements({
+      type: 'in',
+      match: movementsLib.movementMatcher({ keyword: 'urgent' }),
+    });
+    expect(names(page)).toEqual(['Purchase']);
+  });
+
+  it('exports every movement that matches, not only one page', async () => {
+    await history();
+    const { movements, truncated } = await movementsLib.loadAllMovements({
+      type: 'out',
+      match: movementsLib.movementMatcher({ materialIds: new Set(['m1', 'm2']) }),
+    });
+    expect(movements.map((m) => m.project).sort()).toEqual(['Dining table', 'Sofa set for Ms. Reyes']);
+    expect(truncated).toBe(false);
+  });
+});
+
+describe('movement history', () => {
+  it('cannot be edited or deleted once written', async () => {
+    const uid = await signInAs('gm@example.com', 'general_manager');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'in',
+      material,
+      quantity: '5',
+      reason: 'Purchase',
+    });
+    await waitForDoc(`stock_movements/${movementId}`);
+
+    const { doc, updateDoc, deleteDoc } = await import('firebase/firestore');
+    const { db } = await import('../../app-firebase/src/lib/firebase.js');
+
+    // A manager is the highest role that uses the app day to day, and even
+    // they cannot rewrite what happened.
+    await expect(
+      updateDoc(doc(db, 'stock_movements', movementId), { quantity: 1 })
+    ).rejects.toThrow(/permission|insufficient/i);
+    await expect(
+      deleteDoc(doc(db, 'stock_movements', movementId))
+    ).rejects.toThrow(/permission|insufficient/i);
+
+    expect(number((await fetchDoc(`stock_movements/${movementId}`)).quantity)).toBe(5);
+  });
+
+  it('is readable by staff, since it holds no cost or supplier data', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await movementsLib.logMovement({ type: 'in', material, quantity: '5', reason: 'Purchase' });
+
+    const page = await waitFor(async () => {
+      const result = await movementsLib.loadMovements({});
+      return result.movements.length > 0 ? result : null;
+    });
+
+    expect(page.movements[0].materialName).toBe('Mahogany Plank');
+    expect(page.hasMore).toBe(false);
+  });
+
+  it('filters by type and by material', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    await seedMaterial('m2', { name: 'Marine Plywood', stock: 40, threshold: 20, unit: 'sheet' });
+
+    const catalog = await materialsLib.loadCatalog();
+    const plank = catalog.materials.find((m) => m.name === 'Mahogany Plank');
+    const plywood = catalog.materials.find((m) => m.name === 'Marine Plywood');
+
+    await movementsLib.logMovement({ type: 'in', material: plank, quantity: '5', reason: 'Purchase' });
+
+    // The material must be read again before moving it a second time. Its
+    // quantity has changed, and the rules refuse a movement whose beforeQty
+    // is not the figure the server currently holds. The pages do this by
+    // reloading the catalog after every save; a test that reused the stale
+    // object here would be writing something the app never writes.
+    const plankAgain = (await materialsLib.loadCatalog()).materials.find(
+      (m) => m.name === 'Mahogany Plank'
+    );
+    await movementsLib.logMovement({
+      type: 'out',
+      material: plankAgain,
+      quantity: '2',
+      reason: 'Damaged',
+    });
+
+    await movementsLib.logMovement({ type: 'in', material: plywood, quantity: '10', reason: 'Purchase' });
+
+    await waitFor(async () => {
+      const all = await movementsLib.loadMovements({});
+      return all.movements.length === 3 ? all : null;
+    });
+
+    const ins = await movementsLib.loadMovements({ type: 'in' });
+    expect(ins.movements).toHaveLength(2);
+
+    const outs = await movementsLib.loadMovements({ type: 'out' });
+    expect(outs.movements).toHaveLength(1);
+
+    const plankOnly = await movementsLib.loadMovements({ materialId: plank.id });
+    expect(plankOnly.movements).toHaveLength(2);
+
+    const plankIns = await movementsLib.loadMovements({ materialId: plank.id, type: 'in' });
+    expect(plankIns.movements).toHaveLength(1);
+  });
+
+  it('filters by date range', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await movementsLib.logMovement({ type: 'in', material, quantity: '5', reason: 'Purchase' });
+
+    await waitFor(async () => {
+      const all = await movementsLib.loadMovements({});
+      return all.movements.length === 1 ? all : null;
+    });
+
+    const today = new Date();
+    const iso = (date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+    const includingToday = await movementsLib.loadMovements({ dateFrom: iso(today), dateTo: iso(today) });
+    expect(includingToday.movements).toHaveLength(1);
+
+    const lastYear = new Date(today);
+    lastYear.setFullYear(today.getFullYear() - 1);
+    const excludingToday = await movementsLib.loadMovements({
+      dateFrom: iso(lastYear),
+      dateTo: iso(lastYear),
+    });
+    expect(excludingToday.movements).toHaveLength(0);
+  });
+});

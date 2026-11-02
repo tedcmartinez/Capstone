@@ -9,7 +9,10 @@
 // folder path is fixed; change it here if the project folder is renamed.
 $appHost = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $appScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-define('BASE_URL', $appScheme . '://' . $appHost . '/cornerblock/public/');
+// The folder path changed when this app moved into legacy-php/ during the
+// Firebase migration. The LAN version is kept runnable from its new location
+// so it can still be opened for reference and for manuscript screenshots.
+define('BASE_URL', $appScheme . '://' . $appHost . '/cornerblock/legacy-php/public/');
 define('APP_NAME', 'Cornerblock Materials Inventory System');
 
 // Start the session on every request so Auth::check() and friends work

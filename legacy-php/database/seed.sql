@@ -11,12 +11,22 @@ INSERT INTO suppliers (name, viber_contact, notes) VALUES
 ('Sierra Metalworks Trading', '09193456789', 'Supplies steel tubing, angle bars, and adhesives, Antipolo City');
 
 -- Users
--- Password for admin@cornerblock.com is Admin1234
--- Password for staff@cornerblock.com is Staff1234
--- Hashes generated with PHP password_hash() using PASSWORD_BCRYPT
-INSERT INTO users (name, role, email, password_hash, is_active) VALUES
-('Cornerblock Admin', 'general_manager', 'admin@cornerblock.com', '$2y$10$XDR5QPNriKvhdLFxJQ5CS.KoNRy40fBMd1gJRlO.J2suRVhKXWTN2', 1),
-('Cornerblock Staff', 'production_staff', 'staff@cornerblock.com', '$2y$10$vSnegq2BfKzJvgZRVUvopeQVZgUnlkGhdFAZQrxT59twZzQfz8Tse', 1);
+--
+-- The two demo accounts that used to be seeded here have been removed.
+-- Their password hashes, and the matching plaintext passwords, were written
+-- in this file and pushed to a public repository, so they are not safe to
+-- keep or reuse anywhere.
+--
+-- The cloud version does not seed accounts at all. Everyone registers
+-- themselves and the general manager approves them, so there are no shared
+-- demo logins to leak in the first place.
+--
+-- To run this legacy app for reference, insert an account manually with a
+-- hash generated on the spot, for example:
+--   php -r "echo password_hash('your-own-password', PASSWORD_BCRYPT);"
+-- then:
+--   INSERT INTO users (name, role, email, password_hash, is_active)
+--   VALUES ('Your Name', 'general_manager', 'you@example.com', '<hash>', 1);
 
 -- Materials
 -- Several rows are seeded below min_threshold so low-stock and stock-out
@@ -34,6 +44,13 @@ INSERT INTO materials (name, category, size, unit, stock_quantity, min_threshold
 ('Contact Adhesive Gallon', 'adhesives', '1 gallon', 'can', 3, 8, 540.00, 3, 'Below threshold, used for laminate bonding');
 
 -- Stock movements (sample history)
+--
+-- NOTE: logged_by below refers to user_id 1 and 2, and stock_movements has a
+-- foreign key to users. Since the demo accounts are no longer seeded (see the
+-- Users section above), insert two accounts first or these rows will be
+-- rejected. The cloud migration reads movements from a live database dump
+-- rather than from this file, so this only matters when running the legacy
+-- app by hand for reference.
 INSERT INTO stock_movements (material_id, type, quantity, movement_date, logged_by, notes) VALUES
 (1, 'in', 200, '2026-06-01', 1, 'Initial delivery from Antipolo Hardwood Supply'),
 (1, 'out', 50, '2026-06-10', 2, 'Used for cabinet order #101'),

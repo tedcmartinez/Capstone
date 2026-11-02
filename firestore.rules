@@ -1,0 +1,665 @@
+rules_version = '2';
+
+// ============================================================
+// Cornerblock Materials Inventory, Firestore security rules
+//
+// These rules are the real access control for the system. The interface
+// hides buttons and columns a role may not use, but that is only for
+// tidiness: every restriction that matters is enforced here, on Google's
+// servers, where a tampered browser cannot reach it.
+//
+// Three roles:
+//   webmaster         the developer account, the only role that can grant
+//                     or remove general_manager, and which nobody else can
+//                     edit. Identified by a verified email address only.
+//   general_manager   runs the business side: costs, suppliers, reports,
+//                     approving accounts, and the audit trail.
+//   production_staff  the shop floor: sees the catalog and logs stock
+//                     movements. Never sees cost, supplier, or settings.
+//
+// Two rules apply almost everywhere:
+//   1. Nothing is ever deleted. "Delete" sets isArchived to true.
+//   2. Every write must be accompanied by a brand new audit log entry,
+//      created in the same batch or transaction. See audited() below.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================================================
+    // IDENTITY HELPERS
+    // ========================================================
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function logPath(id) {
+      return /databases/$(database)/documents/audit_logs/$(id);
+    }
+
+    function materialPath(id) {
+      return /databases/$(database)/documents/materials/$(id);
+    }
+
+    function movementPath(id) {
+      return /databases/$(database)/documents/stock_movements/$(id);
+    }
+
+    // The webmaster is recognised by email address rather than by a role
+    // stored in the database. This is deliberate: it is the recovery path.
+    // If the users collection were ever wiped or misconfigured, this check
+    // still works, so the project can never become unadministrable.
+    //
+    // email_verified is required, so simply typing this address into a
+    // sign-up form proves nothing. The address must be controlled.
+    // This literal is duplicated in src/lib/config.js and the two must
+    // always match.
+    //
+    // The 'in' checks guard a token with no email claim at all, such as an
+    // anonymous sign-in. Reading a missing claim is an evaluation error,
+    // which denies, but by accident. Every sign-in method this system
+    // offers carries an email, so this cannot happen today; it is here so
+    // that adding one later cannot turn this check into an error.
+    function isWebmaster() {
+      return signedIn()
+          && 'email' in request.auth.token
+          && 'email_verified' in request.auth.token
+          && request.auth.token.email == 'tedcmartinez2@gmail.com'
+          && request.auth.token.email_verified == true;
+    }
+
+    // The caller's own user document, or null if they have not registered
+    // yet. Returning null rather than failing lets isActive() give a clean
+    // false instead of erroring. Written as a single get() because Firestore
+    // caps how many document lookups one request's rules may perform.
+    function meDoc() {
+      return get(userPath(request.auth.uid));
+    }
+
+    // Approved, not pending and not disabled. A pending account passes
+    // signedIn() but fails here, which is what keeps a freshly registered
+    // user from reading any inventory data.
+    function isActive() {
+      return signedIn()
+          && meDoc() != null
+          && meDoc().data.status == 'active';
+    }
+
+    function isGM() {
+      return isWebmaster()
+          || (isActive() && meDoc().data.role == 'general_manager');
+    }
+
+    // Everyone who may use the system at all. Named for the lowest role it
+    // admits, and both higher roles satisfy it.
+    function isStaff() {
+      return isGM()
+          || (isActive() && meDoc().data.role == 'production_staff');
+    }
+
+    // ========================================================
+    // WRITE HELPERS
+    // ========================================================
+
+    // Which fields an update actually touches.
+    //
+    // Guarded by exists() at every call site through isRealUpdate(), because
+    // resource is null when there is no document to compare against, and
+    // reading resource.data in that state raises an evaluation error instead
+    // of returning false. That happens in normal use: a set() on a new
+    // document is checked against the update rules as well as the create
+    // rules, so the update rules must cope with nothing being there yet.
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // True only when this really is a change to an existing document
+    function isRealUpdate() {
+      return resource != null;
+    }
+
+    // A role change that makes someone a general manager who was not one.
+    // Keeping an existing manager's role while changing their status is not
+    // a promotion, so a manager may still disable or re-enable another.
+    function promotesToManager() {
+      return request.resource.data.role == 'general_manager'
+          && resource.data.role != 'general_manager';
+    }
+
+    // The append-only audit trail is enforced here rather than trusted to
+    // the client. A write is accepted only when it carries a lastAuditId
+    // pointing at an audit_logs document that:
+    //   existsAfter  will exist once this batch commits, so the log cannot
+    //                be omitted, and
+    //   !exists      did not exist beforehand, so an id cannot be reused to
+    //                make one log stand in for many changes.
+    //
+    // Because both halves are required, the only way to write data is to
+    // create a fresh log entry in the same batch or transaction. There is
+    // no path that changes inventory without leaving a record.
+    //
+    // The 'in' check comes first on purpose. Reading a key that is not
+    // present in a document raises an evaluation error rather than
+    // returning nothing, and while an error also denies the write, it does
+    // so by accident. Checking the key exists first means a write that
+    // simply forgot its audit entry is refused by a clear false.
+    function audited() {
+      return 'lastAuditId' in request.resource.data
+          && request.resource.data.lastAuditId is string
+          && request.resource.data.lastAuditId.size() > 0
+          && existsAfter(logPath(request.resource.data.lastAuditId))
+          && !exists(logPath(request.resource.data.lastAuditId));
+    }
+
+    // A role may only change on an account that is active before and after.
+    // A pending account is approved first, and a disabled one re-enabled
+    // first, so nobody's role changes while they cannot see it.
+    function staysActive() {
+      return resource.data.status == 'active'
+          && request.resource.data.status == 'active';
+    }
+
+    // The audit entry for deleting users/{uid}: written in the same batch,
+    // new, a user.delete entry about this account, and named after the
+    // account's current lastAuditId. That name is never seen twice, so one
+    // entry cannot stand in for two deletions. The name is built the same
+    // way by deleteAuditId() in src/lib/audit.js.
+    function deletionAudited(uid) {
+      let logId = 'user-delete-' + uid + '-' + resource.data.lastAuditId;
+      return existsAfter(logPath(logId))
+          && !exists(logPath(logId))
+          && getAfter(logPath(logId)).data.action == 'user.delete'
+          && getAfter(logPath(logId)).data.entityId == uid;
+    }
+
+    // ========================================================
+    // STOCK ARITHMETIC
+    //
+    // A stock movement is the only thing that may change a material's
+    // quantity, and these functions are what make that true on the server
+    // rather than only in the browser.
+    //
+    // There are two kinds of movement and they are checked differently,
+    // because they mean different things.
+    //
+    // A stock-in or stock-out is a RELATIVE change: fifty planks arrived,
+    // twenty were taken. It does not matter what the total was when the
+    // slip was written, only that the total moves by that amount. So the
+    // material is updated with an increment, and the rule checks the delta
+    // actually applied against the live value at the moment the batch
+    // lands. Two withdrawals typed on different devices, or one typed
+    // while the connection was down, both apply and both are correct.
+    //
+    // An adjustment is an ABSOLUTE change: the manager has counted the
+    // shelf and the total is now forty, whatever the system thought. That
+    // only makes sense against the figure the manager was looking at, so
+    // an adjustment is checked strictly: the quantity it says it started
+    // from must be the quantity the server holds. If anything moved in
+    // between, the count is out of date and the adjustment is refused.
+    // ========================================================
+
+    // What the device recorded must be self-consistent. These figures are
+    // kept as a record of what the person saw, not as the basis for the
+    // change, so this is a sanity check rather than the real safeguard.
+    function movementMathHolds(m) {
+      return (m.type == 'in' && m.afterQty == m.beforeQty + m.quantity)
+          || (m.type == 'out' && m.afterQty == m.beforeQty - m.quantity)
+          || (m.type == 'adjust' && m.afterQty == m.beforeQty + m.difference);
+    }
+
+    // A stock-in or stock-out: the change actually applied to the material
+    // must equal the movement's quantity, measured against the live server
+    // value, and must not take the total below zero.
+    //
+    // Nothing here refers to beforeQty, which is the whole point. An entry
+    // calculated from a stale total still applies correctly, because what
+    // is checked is the size of the change rather than the figure it
+    // started from. A stock-out that would go below zero is the one case
+    // still refused.
+    function deltaMatchesMovement(materialId) {
+      let path = materialPath(materialId);
+      let movement = request.resource.data;
+
+      return exists(path)
+          && existsAfter(path)
+          && getAfter(path).data.stockQuantity >= 0
+          && (
+            (movement.type == 'in'
+             && getAfter(path).data.stockQuantity
+                  == get(path).data.stockQuantity + movement.quantity)
+            ||
+            (movement.type == 'out'
+             && getAfter(path).data.stockQuantity
+                  == get(path).data.stockQuantity - movement.quantity)
+          );
+    }
+
+    // Every new stock-in carries a photo of its delivery receipt: receiptId
+    // names a receipts document that is written in this same batch, did not
+    // exist before, and belongs to this movement. Stock-ins recorded before
+    // this rule are untouched, since rules only judge new writes, and
+    // adjustments never need one.
+    function receiptAttachedIfIn(movementId) {
+      let m = request.resource.data;
+      return m.type != 'in'
+          || ('receiptId' in m
+              && m.receiptId is string
+              && m.receiptId.size() > 0
+              && !exists(/databases/$(database)/documents/receipts/$(m.receiptId))
+              && existsAfter(/databases/$(database)/documents/receipts/$(m.receiptId))
+              && getAfter(/databases/$(database)/documents/receipts/$(m.receiptId)).data.movementId
+                   == movementId);
+    }
+
+    // A stock-out says which project the materials went to, unless they were
+    // written off as Damaged, which no project uses. 2 to 100 characters
+    // once trimmed. projectKey is the same text lowercased with single
+    // spaces, which is what the history's project filter searches on, so
+    // it must agree with the project exactly.
+    function projectGivenIfNeeded(m) {
+      let project = m.get('project', '');
+      let projectKey = m.get('projectKey', '');
+      return m.type != 'out'
+          || (project is string
+              && projectKey is string
+              && project.size() <= 100
+              && projectKey == project.trim().lower().replace('\\s+', ' ')
+              && (m.get('reason', '') == 'Damaged' || project.trim().size() >= 2));
+    }
+
+    // "Other" explains itself in the notes: at least 5 characters
+    function notesGivenIfOther(m) {
+      let notes = m.get('notes', '');
+      return m.get('reason', '') != 'Other'
+          || (notes is string && notes.trim().size() >= 5);
+    }
+
+    // An adjustment: absolute, so the count must have been taken against
+    // the figure the server still holds.
+    function adjustAgreesWithMaterial(materialId) {
+      let path = materialPath(materialId);
+      let movement = request.resource.data;
+
+      return exists(path)
+          && existsAfter(path)
+          && get(path).data.stockQuantity == movement.beforeQty
+          && getAfter(path).data.stockQuantity == movement.afterQty
+          && getAfter(path).data.stockQuantity >= 0;
+    }
+
+    // Checked from the material's side.
+    //
+    // This half closes a gap the movement rules cannot. Without it a
+    // quantity could be rewritten by updating the material alone and never
+    // filing a movement, because nothing would have required a movement
+    // document to exist. Making the material update name the movement that
+    // justifies it means every change to a stock figure has a record of
+    // who moved what, and why.
+    function backedByNewMovement(materialId) {
+      let movementId = request.resource.data.lastMovementId;
+      let path = movementPath(movementId);
+      let movement = getAfter(path).data;
+
+      return movementId is string
+          && movementId.size() > 0
+          && !exists(path)
+          && existsAfter(path)
+          && movement.materialId == materialId
+          && (
+            // Relative, so compared against the live value
+            (movement.type == 'in'
+             && request.resource.data.stockQuantity
+                  == resource.data.stockQuantity + movement.quantity)
+            ||
+            (movement.type == 'out'
+             && request.resource.data.stockQuantity
+                  == resource.data.stockQuantity - movement.quantity)
+            ||
+            // Absolute, and only a manager may set one
+            (movement.type == 'adjust'
+             && isGM()
+             && movement.beforeQty == resource.data.stockQuantity
+             && request.resource.data.stockQuantity == movement.afterQty)
+          );
+    }
+
+    // ========================================================
+    // USERS
+    //
+    // Self-registration with manager approval. A new account writes its own
+    // document as pending production_staff and can do nothing else until a
+    // manager approves it. Nobody can promote themselves.
+    // ========================================================
+
+    match /users/{uid} {
+
+      // Users read their own record, managers read everyone's
+      allow read: if signedIn() && (request.auth.uid == uid || isGM());
+
+      // Registration. The account being created must be the caller's own,
+      // and the role and status it may claim are fixed: pending staff for
+      // everyone, active webmaster only for the verified webmaster address.
+      // This is why nobody can register themselves as a manager.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && audited()
+        && (
+          (isWebmaster()
+            && request.resource.data.role == 'webmaster'
+            && request.resource.data.status == 'active')
+          ||
+          (!isWebmaster()
+            && request.resource.data.role == 'production_staff'
+            && request.resource.data.status == 'pending')
+        );
+
+      // Users maintain their own profile details. Role and status are not in
+      // this list, so a user can never approve or promote themselves.
+      //
+      // emailVerified is what the manager's Users page shows as Verified, so
+      // it may only ever say what Google says: the email_verified claim in
+      // the caller's own sign-in token. Nobody can mark themselves verified
+      // without opening the link.
+      allow update: if signedIn()
+        && isRealUpdate()
+        && request.auth.uid == uid
+        && audited()
+        && changed().hasOnly(['name', 'photoURL', 'lastLoginAt', 'emailVerified', 'lastAuditId'])
+        && (!changed().hasAny(['emailVerified'])
+            || request.resource.data.emailVerified == request.auth.token.email_verified);
+
+      // Managing other people's accounts: approving, rejecting, disabling,
+      // re-enabling, and changing roles.
+      //
+      //   Nobody touches their own account. Changing your own role or status
+      //   is refused for every role, which is what stops anyone promoting
+      //   themselves, and also stops a manager disabling themselves by
+      //   mistake and locking the shop out.
+      //
+      //   Nobody touches the webmaster account, before or after the write.
+      //
+      //   Only the webmaster may PROMOTE someone to general manager. A
+      //   manager cannot create another manager, so the number of people
+      //   with access to costs and the audit trail can only grow with the
+      //   webmaster's say-so.
+      //
+      //   A manager MAY demote, disable and re-enable other managers, as
+      //   well as staff. That lets the shop deal with a manager who leaves
+      //   without waiting for the webmaster. If managers ever lock each
+      //   other out, the webmaster can still promote someone, which is the
+      //   recovery path the webmaster role exists for.
+      //
+      //   role and status can only take the values the system knows. Without
+      //   this a role could be set to any made-up text, which no rule would
+      //   then recognise.
+      allow update: if isGM()
+        && isRealUpdate()
+        && request.auth.uid != uid
+        && audited()
+        && changed().hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'lastAuditId'])
+        && resource.data.role != 'webmaster'
+        && request.resource.data.role in ['production_staff', 'general_manager']
+        && request.resource.data.status in ['pending', 'active', 'disabled']
+        && (isWebmaster() || !promotesToManager())
+        && (request.resource.data.role == resource.data.role || staysActive());
+
+      // Deleting an account. Only one that has already been disabled, so
+      // removing someone is always a second, deliberate step. Never the
+      // webmaster, never your own, and only by a manager or the webmaster.
+      //
+      // Only the users document goes. The person's movements, receipts and
+      // audit entries stay, each carrying the name saved when it was made,
+      // so the history is not rewritten. The Firebase sign-in itself cannot
+      // be removed from the browser on the free plan; if the person signs in
+      // again they simply register as a new, pending request.
+      //
+      // A deleted document cannot carry lastAuditId, so the entry is found
+      // by a name built from the uid and the lastAuditId the document holds
+      // right now (deletionAudited() above).
+      allow delete: if isGM()
+        && request.auth.uid != uid
+        && resource.data.role != 'webmaster'
+        && resource.data.status == 'disabled'
+        && deletionAudited(uid);
+    }
+
+    // ========================================================
+    // MATERIALS
+    //
+    // The shared catalog. Staff see it in full, because name, category,
+    // unit, stock and threshold are all shop floor information. Cost and
+    // supplier are deliberately NOT here: Firestore cannot hide a field
+    // inside a document, so they live in material_costs instead.
+    // ========================================================
+
+    match /materials/{id} {
+
+      allow read: if isStaff();
+
+      // Both roles may add a material, which matches the LAN system the
+      // client already uses: staff register new stock as it arrives on the
+      // floor. Staff must leave the threshold at zero, the same limit the
+      // old PHP form imposed, so setting reorder levels stays a manager
+      // decision. Cost and supplier are simply a different collection.
+      allow create: if audited() && (
+        isGM()
+        || (isStaff()
+            && 'minThreshold' in request.resource.data
+            && request.resource.data.minThreshold == 0)
+      );
+
+      // Two quite different kinds of update, and the stock quantity is what
+      // separates them.
+      //
+      // A catalog edit may change the name, category, size, unit, threshold
+      // or notes, and may archive the material, but may NOT touch
+      // stockQuantity. That is deliberate, and it matches the LAN system,
+      // whose Material::update() left the column out on purpose so that
+      // "the totals always stay accurate": a quantity is the result of
+      // recorded movements, not something anybody types over.
+      //
+      // A stock movement may change stockQuantity and nothing else, and only
+      // when a matching movement is created in the same batch. Both roles
+      // may do this, since logging movements is the day-to-day job.
+      allow update: if audited() && isRealUpdate() && (
+        (isGM() && !changed().hasAny(['stockQuantity']))
+        ||
+        (isStaff()
+         && changed().hasOnly(['stockQuantity', 'updatedAt', 'updatedBy',
+                               'lastAuditId', 'lastMovementId'])
+         && request.resource.data.stockQuantity is int
+         && request.resource.data.stockQuantity >= 0
+         && backedByNewMovement(id))
+      );
+
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // MATERIAL COSTS, manager only
+    //
+    // Cost per unit and supplier for one material, keyed by the same
+    // document id as the material itself. Split out of materials purely so
+    // that production staff can be denied it, which is the capstone's
+    // role requirement: staff must not see cost or supplier information.
+    // ========================================================
+
+    match /material_costs/{id} {
+      allow read: if isGM();
+      allow create, update: if isGM() && audited();
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // SUPPLIERS, manager only
+    // Same reasoning as material_costs: supplier contact details are a
+    // management concern in the existing system, so staff cannot read them.
+    // ========================================================
+
+    match /suppliers/{id} {
+      allow read: if isGM();
+      allow create, update: if isGM() && audited();
+      allow delete: if false;
+    }
+
+    // ========================================================
+    // STOCK MOVEMENTS
+    //
+    // The permanent record of every stock-in and stock-out. Append only:
+    // a mistake is corrected by logging an opposite movement, never by
+    // editing or removing history.
+    // ========================================================
+
+    match /stock_movements/{id} {
+
+      allow read: if isStaff();
+
+      // A movement must be filed under the person who is actually signed
+      // in, so a user cannot attribute their own entry to a colleague.
+      // The required fields are confirmed present before any of them is
+      // read, for the same reason as in audited(): a missing field should
+      // be a clean refusal, not an evaluation error.
+      //
+      // afterQty is the running total the movement leaves behind, and it
+      // may never be negative. That is what stops a stock-out larger than
+      // the quantity on hand, since the browser calculates afterQty and
+      // this rule refuses the result if it went below zero.
+      // Two kinds of movement, with different rules and different roles.
+      //
+      // A stock-in or stock-out may be filed by anybody approved to use the
+      // system, since that is the day-to-day job of the shop floor, and is
+      // checked as a relative change so an entry made offline still
+      // applies when it syncs.
+      //
+      // An adjustment overrides the total with a counted figure, so it is
+      // a management decision: only a manager may file one, a reason is
+      // required, and it is checked strictly against the current value.
+      allow create: if audited()
+        && request.resource.data.keys().hasAll([
+             'materialId', 'type', 'quantity', 'beforeQty', 'afterQty',
+             'movementDate', 'loggedBy'
+           ])
+        && request.resource.data.loggedBy == request.auth.uid
+        && request.resource.data.quantity is int
+        && request.resource.data.quantity > 0
+        && request.resource.data.beforeQty is int
+        && request.resource.data.afterQty is int
+        && request.resource.data.afterQty >= 0
+        && movementMathHolds(request.resource.data)
+        && (
+          (isStaff()
+           && request.resource.data.type in ['in', 'out']
+           && deltaMatchesMovement(request.resource.data.materialId)
+           && receiptAttachedIfIn(id)
+           && projectGivenIfNeeded(request.resource.data)
+           && notesGivenIfOther(request.resource.data))
+          ||
+          (isGM()
+           && request.resource.data.type == 'adjust'
+           && 'difference' in request.resource.data
+           && request.resource.data.difference is int
+           && request.resource.data.difference != 0
+           // quantity carries the size of the change, so the totals and
+           // the history read the same way as for any other movement
+           && ((request.resource.data.difference > 0
+                && request.resource.data.quantity == request.resource.data.difference)
+               || (request.resource.data.difference < 0
+                   && request.resource.data.quantity == -request.resource.data.difference))
+           && request.resource.data.reason is string
+           && request.resource.data.reason.size() > 0
+           && adjustAgreesWithMaterial(request.resource.data.materialId))
+        );
+
+      allow update, delete: if false;
+    }
+
+    // ========================================================
+    // RECEIPTS
+    //
+    // Receipt images for stock-in entries, held as base64 inside Firestore
+    // because Cloud Storage requires the paid plan. Staff can read them,
+    // which matches the LAN system, where the receipt link on the movement
+    // history page is shown to both roles.
+    //
+    // The size ceiling is enforced here as well as in the browser, so an
+    // oversized image cannot be pushed past the compression step. A
+    // Firestore document cannot exceed 1 MB and base64 inflates a file by
+    // about a third, so 300 KB leaves a wide margin.
+    // ========================================================
+
+    match /receipts/{id} {
+
+      allow read: if isStaff();
+
+      allow create: if isStaff()
+        && audited()
+        && request.resource.data.keys().hasAll(['movementId', 'sizeBytes', 'uploadedBy'])
+        && request.resource.data.uploadedBy == request.auth.uid
+        && request.resource.data.sizeBytes is int
+        && request.resource.data.sizeBytes > 0
+        && request.resource.data.sizeBytes <= 300000;
+
+      allow update, delete: if false;
+    }
+
+    // ========================================================
+    // NOTIFICATION LOG
+    //
+    // One row per alert email attempt, which is what the 24 hour
+    // deduplication rule reads. Written only by the Google Apps Script that
+    // sends the mail, which authenticates through IAM as a service identity
+    // and therefore bypasses these rules entirely. No browser may write
+    // here, so the dedupe record cannot be faked to suppress an alert.
+    // ========================================================
+
+    match /notification_log/{id} {
+      allow read: if isGM();
+      allow write: if false;
+    }
+
+    // ========================================================
+    // AUDIT LOGS
+    //
+    // Append only, with no exception for anyone, the webmaster included.
+    // An audit trail that its own administrator can quietly edit is not an
+    // audit trail, so update and delete are closed outright.
+    //
+    // Any signed-in user may create an entry, including one still pending
+    // approval, because registering and signing in are themselves audited
+    // events. What they cannot do is write someone else's name on it, or
+    // backdate it: the timestamp must be the server's own clock, which is
+    // what request.time holds, so serverTimestamp() is the only value that
+    // will pass.
+    // ========================================================
+
+    match /audit_logs/{id} {
+
+      allow read: if isGM();
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['action', 'entity', 'actorUid', 'timestamp'])
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.timestamp == request.time
+        && request.resource.data.action is string
+        && request.resource.data.entity is string;
+
+      allow update, delete: if false;
+    }
+
+    // ========================================================
+    // Everything else is denied. Categories are intentionally absent:
+    // a category is a plain text field on each material, and the
+    // Categories page is built by grouping the catalog, exactly as the
+    // LAN version did, so there is no collection to secure.
+    // ========================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

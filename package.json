@@ -1,0 +1,39 @@
+{
+  "name": "cornerblock-inventory",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Cloud-Based Materials Inventory Management System with Email Notification for Cornerblock Trading Inc.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:emulators": "node tools/free-emulator-ports.mjs && firebase emulators:start --only firestore,auth --project cornerblock-inventory",
+    "build": "vite build",
+    "preview": "vite preview",
+    "emulators": "node tools/free-emulator-ports.mjs && firebase emulators:start --only firestore,auth",
+    "test": "npm run test:unit && npm run test:rules && npm run test:integration",
+    "test:unit": "vitest run tests/unit",
+    "pretest:rules": "node tools/free-emulator-ports.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project cornerblock-rules-test \"vitest run tests/rules\"",
+    "pretest:integration": "node tools/free-emulator-ports.mjs",
+    "test:integration": "firebase emulators:exec --only firestore,auth --project cornerblock-inventory \"vitest run tests/integration\"",
+    "deploy": "npm run build && firebase deploy",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting",
+    "icons": "node tools/make-icons.mjs",
+    "migrate:dump": "node tools/migrate/dump.mjs",
+    "migrate:convert": "node tools/migrate/convert.mjs",
+    "migrate:import": "node tools/migrate/import.mjs",
+    "migrate:verify": "node tools/migrate/verify.mjs"
+  },
+  "dependencies": {
+    "firebase": "^13.1.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase-admin": "^13.10.0",
+    "firebase-tools": "^13.29.1",
+    "sharp": "^0.34.5",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}
