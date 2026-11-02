@@ -34,8 +34,14 @@ import { PAGE_SIZE } from './config.js';
 // The reason lists live in reasons.js, which has no Firebase imports, so the
 // data migration can read exactly the same lists. Re-exported here so the
 // rest of the app keeps importing them from where it always has.
-export { allowedReasons, REASON_LABELS, reasonLabel } from './reasons.js';
-import { reasonLabel } from './reasons.js';
+export {
+  allowedReasons,
+  REASON_LABELS,
+  reasonLabel,
+  projectKey,
+  missingRequirements,
+} from './reasons.js';
+import { reasonLabel, projectKey, missingRequirements } from './reasons.js';
 
 // The three kinds of movement, as the history and the reports label them
 export const MOVEMENT_TYPES = ['in', 'out', 'adjust'];
@@ -70,8 +76,17 @@ export function movementTypeLabel(type) {
 // Adjustments are different and are handled by adjustStock() below.
 // ============================================================
 
-export async function logMovement({ type, material, quantity, reason, reference, notes, receipt }) {
+export async function logMovement({ type, material, quantity, reason, reference, notes, project, receipt }) {
   const user = currentUser();
+
+  // The same requirements the rules enforce, checked before anything is
+  // written. A movement that would be refused must never be queued offline,
+  // because the refusal would only surface later, after the person has
+  // moved on. See missingRequirements() in reasons.js.
+  const missing = Object.values(
+    missingRequirements({ type, reason, project, notes, hasReceipt: Boolean(receipt) })
+  );
+  if (missing.length > 0) throw new Error(missing[0]);
 
   const amount = Number(quantity);
   const beforeQty = Number(material.stockQuantity) || 0;
@@ -115,6 +130,12 @@ export async function logMovement({ type, material, quantity, reason, reference,
     reason: reason || '',
     reference: reference || '',
     notes: notes || '',
+
+    // Which job a stock-out went to. projectKey is the same text in the
+    // form the history's project filter searches on. Stock-ins have none.
+    project: type === 'out' ? String(project || '').trim() : '',
+    projectKey: type === 'out' ? projectKey(project) : '',
+
     receiptId: receiptRef ? receiptRef.id : null,
 
     loggedBy: user.uid,
@@ -149,7 +170,13 @@ export async function logMovement({ type, material, quantity, reason, reference,
 
   if (receiptRef) ops.push(receiptRef.op);
 
-  const summary = movementSummary({ type, amount, material, reason, reference });
+  const summary = movementSummary({
+    type,
+    amount,
+    material,
+    reason,
+    reference: type === 'out' ? movement.project : reference,
+  });
 
   // Tracked rather than simply awaited. If the server answers promptly the
   // user gets the usual immediate confirmation, and a refusal is thrown here
@@ -499,7 +526,7 @@ export function sortMovementsInPage(movements, sort, direction) {
 
 // Validation shared by the stock-in and stock-out forms, ported from
 // MovementController::logMovement().
-export function validateMovement({ materialId, quantity, type, material }) {
+export function validateMovement({ materialId, quantity, type, material, reason, project, notes, hasReceipt }) {
   const errors = [];
 
   if (!materialId) errors.push('Please select a material.');
@@ -513,5 +540,57 @@ export function validateMovement({ materialId, quantity, type, material }) {
     }
   }
 
+  errors.push(...Object.values(missingRequirements({ type, reason, project, notes, hasReceipt })));
+
   return errors;
+}
+
+// ============================================================
+// PROJECT SUGGESTIONS
+//
+// The projects named on recent stock-outs, most recent first, one entry
+// per project. Offered as suggestions in the Project field and in the
+// history's Project filter, so "Sofa set for Ms. Reyes" is typed the same
+// way every time, which keeps the filter and the reports useful. A new
+// project can still be typed.
+//
+// Stock-outs saved before the project field existed kept the project in
+// reference, so those are read too.
+// ============================================================
+
+const PROJECT_SUGGESTION_SCAN = 300;
+
+export function projectOf(movement) {
+  if (movement.project) return movement.project;
+  return movement.type === 'out' ? movement.reference || '' : '';
+}
+
+export function distinctProjects(movements) {
+  const seen = new Set();
+  const projects = [];
+
+  for (const movement of movements) {
+    const name = String(projectOf(movement) || '').trim();
+    const key = projectKey(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    projects.push(name);
+  }
+
+  return projects;
+}
+
+export async function loadProjectSuggestions() {
+  const snapshot = await getDocs(
+    query(
+      collection(db, 'stock_movements'),
+      where('type', '==', 'out'),
+      // Ordered the way the history is, which uses an index that exists
+      // already (type, movementDate, createdAt)
+      orderBy('movementDate', 'desc'),
+      orderBy('createdAt', 'desc'),
+      limit(PROJECT_SUGGESTION_SCAN)
+    )
+  );
+  return distinctProjects(snapshot.docs.map((d) => d.data()));
 }

@@ -5,6 +5,7 @@
 // real firestore.rules, so the manager-only read is genuinely enforced.
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { withRequirements } from './requirements.js';
 
 globalThis.__CORNERBLOCK_USE_EMULATORS__ = true;
 
@@ -31,7 +32,13 @@ beforeAll(async () => {
   authLib = await import('../../app-firebase/src/lib/auth.js');
   session = await import('../../app-firebase/src/lib/session.js');
   materialsLib = await import('../../app-firebase/src/lib/materials.js');
-  movementsLib = await import('../../app-firebase/src/lib/movements.js');
+  // logMovement() fills in the receipt and project every new movement
+  // needs, unless the test gives its own (see requirements.js)
+  const movementsModule = await import('../../app-firebase/src/lib/movements.js');
+  movementsLib = {
+    ...movementsModule,
+    logMovement: (args) => movementsModule.logMovement(withRequirements(args)),
+  };
   trail = await import('../../app-firebase/src/lib/auditTrail.js');
   auditLib = await import('../../app-firebase/src/lib/audit.js');
 });

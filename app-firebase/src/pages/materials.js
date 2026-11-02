@@ -37,6 +37,8 @@ import {
   stockFormFields,
   wireSteppers,
   wireReceiptPicker,
+  wireRequirements,
+  fillProjectSuggestions,
   submitStockForm,
 } from '../ui/stock-form.js';
 import { adjustStock, allowedReasons, reasonLabel } from '../lib/movements.js';
@@ -748,13 +750,17 @@ function openStockModal(type, materialId) {
   const save = $('#cbStockSave', container);
   save.textContent = isIn ? 'Confirm Stock In' : 'Confirm Stock Out';
   save.className = `cb-btn ${isIn ? 'cb-btn-in' : 'cb-btn-out'}`;
-  save.disabled = false;
-
   const form = $('#cbStockForm', container);
   wireSteppers(form);
+
+  // The same requirements as the full page: Confirm waits for the receipt,
+  // the project and the notes the reason needs
+  const refresh = wireRequirements(form, type, save, () => movingReceipt);
   wireReceiptPicker(form, (ready) => {
     movingReceipt = ready;
+    refresh();
   });
+  if (!isIn) fillProjectSuggestions(form);
 
   modalFor('#cbStockModal').show();
 }

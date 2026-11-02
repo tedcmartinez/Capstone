@@ -483,3 +483,83 @@
     flex-wrap: wrap;
     justify-content: flex-end;
 }
+
+/* ============================================================
+   12. STOCK FORM
+   The required marker, the message under a field that still
+   needs something, and the searchable material picker.
+   ============================================================ */
+
+.cb-required {
+    margin-left: 2px;
+    color: var(--cb-red);
+    font-weight: 700;
+}
+
+.cb-field-error {
+    margin-top: 4px;
+    color: var(--cb-red);
+    font-size: 12.5px;
+}
+
+.cb-field-error:empty {
+    display: none;
+}
+
+.cb-picker {
+    position: relative;
+}
+
+.cb-picker-list {
+    position: absolute;
+    z-index: 1060;
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    overflow-y: auto;
+    list-style: none;
+    background-color: var(--cb-surface);
+    border: 1px solid var(--cb-border);
+    border-radius: var(--cb-radius);
+    box-shadow: 0 8px 24px rgba(65, 33, 24, 0.12);
+}
+
+.cb-picker-option {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.cb-picker-option.is-active,
+.cb-picker-option:hover {
+    background-color: var(--cb-hover);
+}
+
+.cb-picker-option[aria-selected="true"] .cb-picker-name {
+    color: var(--cb-orange-dark);
+}
+
+.cb-picker-option[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.cb-picker-name {
+    font-weight: 600;
+    font-size: 13.5px;
+}
+
+.cb-picker-meta {
+    color: var(--cb-muted);
+    font-size: 12px;
+}
+
+.cb-picker-empty {
+    padding: 8px 12px;
+    color: var(--cb-muted);
+    font-size: 13px;
+}

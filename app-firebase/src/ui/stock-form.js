@@ -6,8 +6,17 @@
 // arrangement, with the modal posting to the same route as the page, so the
 // validation and the stock arithmetic could not drift apart between them.
 
-import { esc, $, $$, alertHtml, friendlyError, todayIso, shortDate } from '../lib/dom.js';
-import { allowedReasons, reasonLabel, validateMovement, logMovement } from '../lib/movements.js';
+import { esc, $, $$, alertHtml, todayIso, shortDate } from '../lib/dom.js';
+import {
+  allowedReasons,
+  reasonLabel,
+  validateMovement,
+  logMovement,
+  missingRequirements,
+  loadProjectSuggestions,
+} from '../lib/movements.js';
+import { projectRequired, notesRequired, receiptRequired, PROJECT_MAX } from '../lib/reasons.js';
+import { materialPickerHtml, wireMaterialPicker } from './material-picker.js';
 import { compressReceipt, formatSize } from '../lib/receipts.js';
 import { requestStockCheck, describeAlertResult } from '../lib/alerts.js';
 import { RECEIPT_MAX_BYTES } from '../lib/config.js';
@@ -32,37 +41,15 @@ function materialField(type, materials, fixedMaterial) {
       </div>`;
   }
 
-  // Stock-out cannot take from an empty material, so those options are
-  // disabled and labelled, exactly as stockout.php did.
-  const options = materials
-    .map((material) => {
-      const stock = Number(material.stockQuantity) || 0;
-      const empty = stock === 0;
-      const disabled = type === 'out' && empty;
-
-      return `
-        <option value="${esc(material.id)}"${disabled ? ' disabled' : ''}>
-          ${esc(material.name)} (${stock} ${esc(material.unit)} in stock)${
-            type === 'out' && empty ? ' - out of stock' : ''
-          }
-        </option>`;
-    })
-    .join('');
-
-  return `
-    <div class="cb-field">
-      <label class="cb-field-label" for="sfMaterial">Material</label>
-      <select name="materialId" id="sfMaterial" class="cb-select w-100" required>
-        <option value="">-- Select material --</option>
-        ${options}
-      </select>
-      ${
-        type === 'out'
-          ? '<div class="cb-help">Materials with no stock left cannot be selected.</div>'
-          : ''
-      }
-    </div>`;
+  // Stock-out cannot take from an empty material, so those are shown but
+  // cannot be chosen, exactly as stockout.php disabled them
+  return materialPickerHtml(type);
 }
+
+// The marker on a field that must be filled in. aria-hidden because the
+// field itself carries aria-required, which is what a screen reader says.
+const REQUIRED = '<span class="cb-required" aria-hidden="true">*</span>';
+const OPTIONAL = '<span class="text-muted">(optional)</span>';
 
 export function stockFormFields(type, materials, fixedMaterial = null) {
   const isIn = type === 'in';
@@ -98,13 +85,27 @@ export function stockFormFields(type, materials, fixedMaterial = null) {
         </div>
       </div>
       <div class="col-md-6">
+        ${
+          isIn
+            ? `
         <div class="cb-field">
-          <label class="cb-field-label" for="sfReference">
-            ${isIn ? 'Reference' : 'Project'} <span class="text-muted">(optional)</span>
-          </label>
+          <label class="cb-field-label" for="sfReference">Reference ${OPTIONAL}</label>
           <input type="text" name="reference" id="sfReference" class="cb-input"
-                 placeholder="${isIn ? 'e.g. PO-1042' : 'e.g. Sofa set for Ms. Reyes'}">
-        </div>
+                 placeholder="e.g. PO-1042">
+        </div>`
+            : `
+        <div class="cb-field">
+          <label class="cb-field-label" for="sfProject">
+            Project <span id="sfProjectMark">${REQUIRED}</span>
+          </label>
+          <input type="text" name="project" id="sfProject" class="cb-input"
+                 list="sfProjectList" maxlength="${PROJECT_MAX}" autocomplete="off"
+                 aria-required="true" aria-describedby="sfProjectHelp"
+                 placeholder="e.g. Sofa set for Ms. Reyes">
+          <datalist id="sfProjectList"></datalist>
+          <div class="cb-field-error" id="sfProjectHelp"></div>
+        </div>`
+        }
       </div>
     </div>
 
@@ -118,21 +119,25 @@ export function stockFormFields(type, materials, fixedMaterial = null) {
     </div>
 
     <div class="cb-field">
-      <label class="cb-field-label" for="sfNotes">Notes <span class="text-muted">(optional)</span></label>
-      <textarea name="notes" id="sfNotes" class="cb-textarea" rows="${isIn ? 3 : 3}"></textarea>
+      <label class="cb-field-label" for="sfNotes">Notes <span id="sfNotesMark">${OPTIONAL}</span></label>
+      <textarea name="notes" id="sfNotes" class="cb-textarea" rows="3"
+                aria-describedby="sfNotesHelp"></textarea>
+      <div class="cb-field-error" id="sfNotesHelp"></div>
     </div>
 
     ${
       isIn
         ? `
     <div class="cb-field mb-0">
-      <label class="cb-field-label" for="sfReceipt">Receipt Photo <span class="text-muted">(optional)</span></label>
+      <label class="cb-field-label" for="sfReceipt">Receipt Photo ${REQUIRED}</label>
       <input type="file" name="receipt" id="sfReceipt" class="cb-input"
-             accept="image/jpeg,image/png,image/webp">
+             accept="image/jpeg,image/png,image/webp"
+             aria-required="true" aria-describedby="sfReceiptHelp">
       <div class="cb-help">
         JPG, PNG or WEBP. Large images are shrunk automatically to fit the
         ${formatSize(RECEIPT_MAX_BYTES)} limit.
       </div>
+      <div class="cb-field-error" id="sfReceiptHelp"></div>
       <div id="sfReceiptStatus"></div>
     </div>`
         : ''
@@ -201,6 +206,108 @@ export function wireReceiptPicker(scope, onReady) {
 }
 
 // ============================================================
+// REQUIREMENTS
+//
+// The form keeps Confirm switched off until everything the rules require is
+// there: a receipt photo on a stock-in, a project on a stock-out (unless
+// Damaged), and notes when the reason is Other. Each missing item says what
+// it needs right under its field. Changing the reason updates the labels at
+// once and never clears what has been typed.
+//
+// getReceipt() reports whether a compressed receipt is ready.
+// Returns refresh(), which the caller runs after the receipt changes.
+// ============================================================
+
+export function wireRequirements(form, type, saveButton, getReceipt) {
+  const reasonSelect = form.reason;
+  const hint = (id) => form.querySelector(`#${id}`);
+
+  // Messages appear only once someone has had the chance to fill a field,
+  // so a fresh form is not covered in red before anything is typed
+  const touched = new Set();
+
+  function refresh() {
+    const reason = reasonSelect.value;
+    const missing = missingRequirements({
+      type,
+      reason,
+      project: form.project?.value,
+      notes: form.notes.value,
+      hasReceipt: Boolean(getReceipt()),
+    });
+
+    // Project: required unless Damaged
+    const projectMark = hint('sfProjectMark');
+    if (projectMark) {
+      const required = projectRequired(type, reason);
+      projectMark.innerHTML = required ? REQUIRED : OPTIONAL;
+      form.project.setAttribute('aria-required', String(required));
+    }
+
+    // Notes: required when the reason is Other
+    const notesRequiredNow = notesRequired(type, reason);
+    hint('sfNotesMark').innerHTML = notesRequiredNow ? REQUIRED : OPTIONAL;
+    form.notes.setAttribute('aria-required', String(notesRequiredNow));
+    form.notes.placeholder = notesRequiredNow
+      ? `Explain the reason for this ${type === 'in' ? 'stock-in' : 'stock-out'}.`
+      : '';
+
+    show('sfProjectHelp', 'project', missing.project);
+    show('sfNotesHelp', 'notes', missing.notes);
+    show('sfReceiptHelp', 'receipt', missing.receipt);
+
+    const materialChosen = Boolean(form.materialId.value);
+    saveButton.disabled = !materialChosen || Object.keys(missing).length > 0;
+  }
+
+  function show(id, field, text) {
+    const target = hint(id);
+    if (!target) return;
+    // The receipt message shows from the start: without it, a switched-off
+    // Confirm button would give no clue why
+    const visible = text && (field === 'receipt' || touched.has(field));
+    target.textContent = visible ? text : '';
+  }
+
+  const touch = (field) => () => {
+    touched.add(field);
+    refresh();
+  };
+
+  reasonSelect.addEventListener('change', refresh);
+  form.project?.addEventListener('input', refresh);
+  form.project?.addEventListener('blur', touch('project'));
+  form.notes.addEventListener('input', refresh);
+  form.notes.addEventListener('blur', touch('notes'));
+
+  // Choosing Other or a reason that needs a project makes those fields
+  // count as touched, so the reason for a switched-off Confirm is shown
+  reasonSelect.addEventListener('change', () => {
+    if (notesRequired(type, reasonSelect.value)) touched.add('notes');
+    refresh();
+  });
+
+  refresh();
+  return refresh;
+}
+
+// Fills the Project field's suggestions. Best effort: offline or on any
+// error the field still works, just without suggestions.
+export async function fillProjectSuggestions(form) {
+  const list = form.querySelector('#sfProjectList');
+  if (!list) return;
+
+  try {
+    const projects = await loadProjectSuggestions();
+    list.innerHTML = projects.map((project) => `<option value="${esc(project)}"></option>`).join('');
+  } catch (error) {
+    console.warn('Could not load project suggestions:', error);
+  }
+}
+
+export { wireMaterialPicker };
+
+// ============================================================
 // SAVING
 //
 // Shared by the page and the modal so the two cannot behave differently.
@@ -212,7 +319,20 @@ export async function submitStockForm({ form, type, materials, receipt, fixedMat
   const material = fixedMaterial || materials.find((m) => m.id === materialId);
   const quantity = form.quantity.value;
 
-  const errors = validateMovement({ materialId, quantity, type, material });
+  const reason = form.reason.value;
+  const project = form.project ? form.project.value.trim() : '';
+  const notes = form.notes.value.trim();
+
+  const errors = validateMovement({
+    materialId,
+    quantity,
+    type,
+    material,
+    reason,
+    project,
+    notes,
+    hasReceipt: Boolean(receipt) || !receiptRequired(type),
+  });
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -221,9 +341,10 @@ export async function submitStockForm({ form, type, materials, receipt, fixedMat
     type,
     material,
     quantity,
-    reason: form.reason.value,
-    reference: form.reference.value.trim(),
-    notes: form.notes.value.trim(),
+    reason,
+    reference: form.reference ? form.reference.value.trim() : '',
+    project,
+    notes,
     receipt: type === 'in' ? receipt : null,
   });
 

@@ -71,7 +71,7 @@ describe('validateMovement', () => {
   });
 
   it('requires a whole quantity greater than zero', () => {
-    const base = { materialId: 'm1', type: 'in' };
+    const base = { materialId: 'm1', type: 'in', hasReceipt: true };
 
     expect(validateMovement({ ...base, quantity: '0' })).toContain(
       'Quantity must be a whole number greater than zero.'
@@ -83,7 +83,9 @@ describe('validateMovement', () => {
   });
 
   it('accepts a valid stock-in', () => {
-    expect(validateMovement({ materialId: 'm1', quantity: '50', type: 'in', material })).toEqual([]);
+    expect(
+      validateMovement({ materialId: 'm1', quantity: '50', type: 'in', material, hasReceipt: true })
+    ).toEqual([]);
   });
 
   // ---- 12. Stock out greater than on hand is blocked ----
@@ -101,13 +103,20 @@ describe('validateMovement', () => {
 
   it('12. allows a stock-out of exactly the stock on hand', () => {
     expect(
-      validateMovement({ materialId: 'm1', quantity: '18', type: 'out', material })
+      validateMovement({
+        materialId: 'm1',
+        quantity: '18',
+        type: 'out',
+        material,
+        reason: 'Project Usage',
+        project: 'Sofa set',
+      })
     ).toEqual([]);
   });
 
   it('12. does not cap a stock-in, since receiving adds stock', () => {
     expect(
-      validateMovement({ materialId: 'm1', quantity: '9999', type: 'in', material })
+      validateMovement({ materialId: 'm1', quantity: '9999', type: 'in', material, hasReceipt: true })
     ).toEqual([]);
   });
 

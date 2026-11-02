@@ -7,6 +7,7 @@
 // into asking for one.
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { withRequirements } from './requirements.js';
 
 globalThis.__CORNERBLOCK_USE_EMULATORS__ = true;
 
@@ -31,7 +32,13 @@ beforeAll(async () => {
   authLib = await import('../../app-firebase/src/lib/auth.js');
   session = await import('../../app-firebase/src/lib/session.js');
   materialsLib = await import('../../app-firebase/src/lib/materials.js');
-  movementsLib = await import('../../app-firebase/src/lib/movements.js');
+  // logMovement() fills in the receipt and project every new movement
+  // needs, unless the test gives its own (see requirements.js)
+  const movementsModule = await import('../../app-firebase/src/lib/movements.js');
+  movementsLib = {
+    ...movementsModule,
+    logMovement: (args) => movementsModule.logMovement(withRequirements(args)),
+  };
 });
 
 afterAll(async () => {
@@ -146,6 +153,75 @@ function number(field) {
 // LOGGING A MOVEMENT
 // ============================================================
 
+// ============================================================
+// NOTHING IS QUEUED THAT THE SERVER WOULD REFUSE
+//
+// The receipt, project and notes requirements are checked before the batch
+// is built, so an entry missing one is stopped on screen and never sits in
+// the offline queue waiting to fail. receipt: null and project: '' are
+// passed explicitly, so the test helper does not fill them in.
+// ============================================================
+
+describe('round 2 requirements, checked before anything is written', () => {
+  async function movementCount() {
+    const response = await fetch(
+      `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/stock_movements`,
+      { headers: OWNER }
+    );
+    return ((await response.json()).documents || []).length;
+  }
+
+  it('refuses a stock-in with no receipt photo', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'in', material, quantity: '5', reason: 'Purchase', receipt: null })
+    ).rejects.toThrow('Attach a photo of the delivery receipt.');
+    expect(await movementCount()).toBe(0);
+  });
+
+  it('refuses a stock-out with no project unless it is Damaged', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'out', material, quantity: '1', reason: 'Transfer', project: '' })
+    ).rejects.toThrow('Enter the project these materials are for.');
+    expect(await movementCount()).toBe(0);
+
+    await movementsLib.logMovement({ type: 'out', material, quantity: '1', reason: 'Damaged', project: '' });
+    expect(await movementCount()).toBe(1);
+  });
+
+  it('saves the project with its search key', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    const { movementId } = await movementsLib.logMovement({
+      type: 'out',
+      material,
+      quantity: '1',
+      reason: 'Project Usage',
+      project: '  Sofa   Set for Ms. Reyes ',
+    });
+
+    const saved = await fetchDoc(`stock_movements/${movementId}`);
+    expect(saved.project.stringValue).toBe('Sofa   Set for Ms. Reyes');
+    expect(saved.projectKey.stringValue).toBe('sofa set for ms. reyes');
+  });
+
+  it('refuses Other without an explanation in the notes', async () => {
+    await signInAs('staff@example.com', 'production_staff');
+    const material = (await materialsLib.loadCatalog()).materials[0];
+
+    await expect(
+      movementsLib.logMovement({ type: 'out', material, quantity: '1', reason: 'Other', notes: 'hm' })
+    ).rejects.toThrow('Explain the reason for this stock-out.');
+    expect(await movementCount()).toBe(0);
+  });
+});
+
 describe('logging a stock-in', () => {
   it('writes the movement and raises the material total together', async () => {
     const uid = await signInAs('staff@example.com', 'production_staff');
@@ -224,7 +300,7 @@ describe('logging a stock-in', () => {
       material,
       quantity: '5',
       reason: 'Project Usage',
-      reference: 'order #102',
+      project: 'order #102',
     });
 
     const entry = await waitForAudit('stock.out');

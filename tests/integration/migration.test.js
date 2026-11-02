@@ -10,6 +10,7 @@
 // the movement and receipt paths are exercised here with synthetic data.
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { withRequirements } from './requirements.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,7 +76,13 @@ beforeAll(async () => {
   authLib = await import('../../app-firebase/src/lib/auth.js');
   session = await import('../../app-firebase/src/lib/session.js');
   materialsLib = await import('../../app-firebase/src/lib/materials.js');
-  movementsLib = await import('../../app-firebase/src/lib/movements.js');
+  // logMovement() fills in the receipt and project every new movement
+  // needs, unless the test gives its own (see requirements.js)
+  const movementsModule = await import('../../app-firebase/src/lib/movements.js');
+  movementsLib = {
+    ...movementsModule,
+    logMovement: (args) => movementsModule.logMovement(withRequirements(args)),
+  };
   receiptsLib = await import('../../app-firebase/src/lib/receipts.js');
   trail = await import('../../app-firebase/src/lib/auditTrail.js');
 

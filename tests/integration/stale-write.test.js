@@ -11,6 +11,7 @@
 // must both apply and leave eight.
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { withRequirements } from './requirements.js';
 
 globalThis.__CORNERBLOCK_USE_EMULATORS__ = true;
 
@@ -39,7 +40,13 @@ beforeAll(async () => {
   authLib = await import('../../app-firebase/src/lib/auth.js');
   session = await import('../../app-firebase/src/lib/session.js');
   materialsLib = await import('../../app-firebase/src/lib/materials.js');
-  movementsLib = await import('../../app-firebase/src/lib/movements.js');
+  // logMovement() fills in the receipt and project every new movement
+  // needs, unless the test gives its own (see requirements.js)
+  const movementsModule = await import('../../app-firebase/src/lib/movements.js');
+  movementsLib = {
+    ...movementsModule,
+    logMovement: (args) => movementsModule.logMovement(withRequirements(args)),
+  };
 });
 
 afterAll(async () => {
@@ -148,7 +155,22 @@ function buildMovementBatch({ uid, type, quantity, recordedBefore, materialId = 
   const movementId = doc(collection(db, 'stock_movements')).id;
   const recordedAfter = type === 'in' ? recordedBefore + quantity : recordedBefore - quantity;
 
+  // Every new stock-in carries its receipt, written in the same batch
+  const receiptId = type === 'in' ? doc(collection(db, 'receipts')).id : null;
+
   const batch = writeBatch(db);
+
+  if (receiptId) {
+    batch.set(doc(db, 'receipts', receiptId), {
+      movementId,
+      mimeType: 'image/jpeg',
+      dataBase64: 'x'.repeat(400),
+      sizeBytes: 300,
+      uploadedBy: uid,
+      createdAt: serverTimestamp(),
+      lastAuditId: auditId,
+    });
+  }
 
   batch.set(doc(db, 'stock_movements', movementId), {
     materialId,
@@ -162,7 +184,10 @@ function buildMovementBatch({ uid, type, quantity, recordedBefore, materialId = 
     reason: type === 'in' ? 'Purchase' : 'Project Usage',
     reference: '',
     notes: '',
-    receiptId: null,
+    // Every new stock-out names its project
+    project: type === 'out' ? 'Test project' : '',
+    projectKey: type === 'out' ? 'test project' : '',
+    receiptId,
     loggedBy: uid,
     loggedByName: 'Juan Dela Cruz',
     createdAt: serverTimestamp(),
@@ -352,6 +377,8 @@ describe('the change applied against what the movement claims', () => {
       afterQty: 18 - quantity,
       movementDate: '2026-11-01',
       reason: 'Project Usage',
+      project: 'Test project',
+      projectKey: 'test project',
       reference: '',
       notes: '',
       receiptId: null,
@@ -417,6 +444,8 @@ describe('the change applied against what the movement claims', () => {
       afterQty: 17,
       movementDate: '2026-11-01',
       reason: 'Project Usage',
+      project: 'Test project',
+      projectKey: 'test project',
       reference: '',
       notes: '',
       receiptId: null,
@@ -761,6 +790,8 @@ describe('the ordinary paths, with the new checks in place', () => {
       material,
       quantity: '5',
       reason: 'Project Usage',
+      project: 'Test project',
+      projectKey: 'test project',
       reference: 'order #102',
     });
 

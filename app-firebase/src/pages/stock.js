@@ -11,6 +11,9 @@ import {
   stockFormFields,
   wireSteppers,
   wireReceiptPicker,
+  wireRequirements,
+  wireMaterialPicker,
+  fillProjectSuggestions,
   submitStockForm,
 } from '../ui/stock-form.js';
 import { updateAlerts } from '../ui/shell.js';
@@ -102,15 +105,23 @@ function draw(container, type) {
   messages = [];
 
   const form = $('#sfForm', container);
-
-  if (preselected && form.materialId) {
-    form.materialId.value = preselected;
-  }
+  const saveButton = $('#sfSave', container);
 
   wireSteppers(form);
+
+  // Confirm stays off until the material and everything the rules require
+  // are there. refresh() runs again whenever one of them changes.
+  const refresh = wireRequirements(form, type, saveButton, () => receipt);
+
+  const picker = wireMaterialPicker(form, materials, () => refresh());
+  if (preselected) picker.setValue(preselected);
+
   wireReceiptPicker(form, (ready) => {
     receipt = ready;
+    refresh();
   });
+
+  if (!isIn) fillProjectSuggestions(form);
 
   form.addEventListener('submit', (event) => save(event, container, type));
 }
@@ -124,13 +135,15 @@ function sidePanel(type) {
   const points = isIn
     ? [
         'The quantity must be greater than zero.',
+        'A photo of the delivery receipt is required. Large photos are shrunk automatically.',
         'The date is recorded as today and cannot be backdated.',
-        'A receipt photo can be attached for the manager’s records.',
         'Once saved, the catalog and dashboard totals update straight away.',
       ]
     : [
         'The quantity must be greater than zero.',
         'You cannot remove more than the stock on hand.',
+        'Name the project the materials are for. Only Damaged stock-outs may leave it empty.',
+        'Choosing Other means explaining the reason in the notes.',
         'The date is recorded as today and cannot be backdated.',
         'Crossing the minimum threshold emails a low-stock alert.',
       ];

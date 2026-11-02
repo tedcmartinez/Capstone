@@ -239,6 +239,46 @@ service cloud.firestore {
           );
     }
 
+    // Every new stock-in carries a photo of its delivery receipt: receiptId
+    // names a receipts document that is written in this same batch, did not
+    // exist before, and belongs to this movement. Stock-ins recorded before
+    // this rule are untouched, since rules only judge new writes, and
+    // adjustments never need one.
+    function receiptAttachedIfIn(movementId) {
+      let m = request.resource.data;
+      return m.type != 'in'
+          || ('receiptId' in m
+              && m.receiptId is string
+              && m.receiptId.size() > 0
+              && !exists(/databases/$(database)/documents/receipts/$(m.receiptId))
+              && existsAfter(/databases/$(database)/documents/receipts/$(m.receiptId))
+              && getAfter(/databases/$(database)/documents/receipts/$(m.receiptId)).data.movementId
+                   == movementId);
+    }
+
+    // A stock-out says which project the materials went to, unless they were
+    // written off as Damaged, which no project uses. 2 to 100 characters
+    // once trimmed. projectKey is the same text lowercased with single
+    // spaces, which is what the history's project filter searches on, so
+    // it must agree with the project exactly.
+    function projectGivenIfNeeded(m) {
+      let project = m.get('project', '');
+      let projectKey = m.get('projectKey', '');
+      return m.type != 'out'
+          || (project is string
+              && projectKey is string
+              && project.size() <= 100
+              && projectKey == project.trim().lower().replace('\\s+', ' ')
+              && (m.get('reason', '') == 'Damaged' || project.trim().size() >= 2));
+    }
+
+    // "Other" explains itself in the notes: at least 5 characters
+    function notesGivenIfOther(m) {
+      let notes = m.get('notes', '');
+      return m.get('reason', '') != 'Other'
+          || (notes is string && notes.trim().size() >= 5);
+    }
+
     // An adjustment: absolute, so the count must have been taken against
     // the figure the server still holds.
     function adjustAgreesWithMaterial(materialId) {
@@ -514,7 +554,10 @@ service cloud.firestore {
         && (
           (isStaff()
            && request.resource.data.type in ['in', 'out']
-           && deltaMatchesMovement(request.resource.data.materialId))
+           && deltaMatchesMovement(request.resource.data.materialId)
+           && receiptAttachedIfIn(id)
+           && projectGivenIfNeeded(request.resource.data)
+           && notesGivenIfOther(request.resource.data))
           ||
           (isGM()
            && request.resource.data.type == 'adjust'

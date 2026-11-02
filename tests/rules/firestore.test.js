@@ -282,7 +282,9 @@ describe('approval unlocks the system', () => {
       afterQty: 13,
       movementDate: '2026-10-31',
       reason: 'Project Usage',
-      reference: 'order #102',
+      reference: '',
+      project: 'order #102',
+      projectKey: 'order #102',
       notes: '',
       receiptId: null,
       loggedBy: 'uid_staff',
@@ -955,6 +957,166 @@ describe('emailVerified on your own account', () => {
 });
 
 // ============================================================
+// WHAT A NEW MOVEMENT MUST CARRY (round 2, part 2)
+//
+//   stock-in      a receipt written in the same batch, for this movement
+//   stock-out     a project of 2 to 100 characters, unless Damaged, with a
+//                 projectKey that matches it
+//   reason Other  notes of at least 5 characters
+// ============================================================
+
+describe('what a new movement must carry', () => {
+  beforeEach(async () => {
+    await seedActiveStaff(env, 'uid_staff');
+    await seedDoc(env, 'materials', 'mat_1', {
+      name: 'Foam Padding Roll',
+      stockQuantity: 10,
+      minThreshold: 5,
+      unit: 'roll',
+      isArchived: false,
+    });
+  });
+
+  // The batch the application writes, with every field open to override.
+  // receipt: 'same-batch' writes one for this movement, 'other-movement'
+  // writes one that belongs to a different movement, 'missing' names one
+  // that is never written, and null leaves receiptId empty.
+  function movement(db, { type = 'out', quantity = 2, receipt = null, omit = [], ...fields } = {}) {
+    const auditId = nextAuditId();
+    const movementId = `mv_${auditId}`;
+    const receiptId = receipt ? `rc_${auditId}` : null;
+    const afterQty = type === 'in' ? 10 + quantity : 10 - quantity;
+    const batch = writeBatch(db);
+
+    const data = {
+      materialId: 'mat_1',
+      materialName: 'Foam Padding Roll',
+      type,
+      quantity,
+      beforeQty: 10,
+      afterQty,
+      movementDate: '2026-11-02',
+      reason: type === 'in' ? 'Purchase' : 'Project Usage',
+      reference: '',
+      project: type === 'out' ? 'Sofa set' : '',
+      projectKey: type === 'out' ? 'sofa set' : '',
+      notes: '',
+      receiptId,
+      loggedBy: 'uid_staff',
+      loggedByName: 'Seeded User',
+      createdAt: serverTimestamp(),
+      lastAuditId: auditId,
+      ...fields,
+    };
+    for (const field of omit) delete data[field];
+    batch.set(doc(db, 'stock_movements', movementId), data);
+    batch.update(doc(db, 'materials', 'mat_1'), {
+      stockQuantity: afterQty,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'uid_staff',
+      lastMovementId: movementId,
+      lastAuditId: auditId,
+    });
+    if (receipt === 'same-batch' || receipt === 'other-movement') {
+      batch.set(doc(db, 'receipts', receiptId), {
+        movementId: receipt === 'same-batch' ? movementId : 'mv_someone_else',
+        mimeType: 'image/jpeg',
+        dataBase64: 'x'.repeat(40),
+        sizeBytes: 30,
+        uploadedBy: 'uid_staff',
+        createdAt: serverTimestamp(),
+        lastAuditId: auditId,
+      });
+    }
+    batch.set(doc(db, 'audit_logs', auditId), auditEntry('uid_staff', {
+      action: type === 'in' ? 'stock.in' : 'stock.out',
+      entity: 'stock_movements',
+    }));
+
+    return batch.commit();
+  }
+
+  const asStaff = () => asUser(env, 'uid_staff', 'staff@example.com');
+
+  // ---- 2.1 receipt on every stock-in ----
+
+  it('2.1 a stock-in with its receipt in the same batch is allowed', async () => {
+    await assertSucceeds(movement(asStaff(), { type: 'in', receipt: 'same-batch' }));
+  });
+
+  it('2.1 a stock-in without a receipt is refused', async () => {
+    await assertFails(movement(asStaff(), { type: 'in', receipt: null }));
+  });
+
+  it('2.1 a stock-in naming a receipt that is never written is refused', async () => {
+    await assertFails(movement(asStaff(), { type: 'in', receipt: 'missing' }));
+  });
+
+  it('2.1 a stock-in borrowing another movement\'s receipt is refused', async () => {
+    await assertFails(movement(asStaff(), { type: 'in', receipt: 'other-movement' }));
+  });
+
+  it('2.1 an existing receipt cannot be reused', async () => {
+    await seedDoc(env, 'receipts', 'rc_old', { movementId: 'mv_old', sizeBytes: 30 });
+
+    await assertFails(movement(asStaff(), { type: 'in', receiptId: 'rc_old' }));
+  });
+
+  it('2.1 a stock-out needs no receipt', async () => {
+    await assertSucceeds(movement(asStaff(), { type: 'out' }));
+  });
+
+  // ---- 2.2 project on every stock-out except Damaged ----
+
+  it('2.2 a stock-out without a project is refused', async () => {
+    await assertFails(movement(asStaff(), { project: '', projectKey: '' }));
+  });
+
+  it('2.2 a new stock-out with no project field at all is refused', async () => {
+    await assertFails(movement(asStaff(), { omit: ['project', 'projectKey'] }));
+  });
+
+  it('2.2 one character is not a project', async () => {
+    await assertFails(movement(asStaff(), { project: 'A', projectKey: 'a' }));
+  });
+
+  it('2.2 more than 100 characters is refused', async () => {
+    const long = 'x'.repeat(101);
+    await assertFails(movement(asStaff(), { project: long, projectKey: long }));
+  });
+
+  it('2.2 a Damaged stock-out may leave the project empty', async () => {
+    await assertSucceeds(movement(asStaff(), { reason: 'Damaged', project: '', projectKey: '' }));
+  });
+
+  it('2.2 Transfer and Other need a project too', async () => {
+    await assertFails(movement(asStaff(), { reason: 'Transfer', project: '', projectKey: '' }));
+    await assertFails(
+      movement(asStaff(), { reason: 'Other', notes: 'Spilled varnish', project: '', projectKey: '' })
+    );
+  });
+
+  it('2.2 projectKey must be the project lowercased, trimmed, with single spaces', async () => {
+    await assertSucceeds(
+      movement(asStaff(), { project: 'Sofa  Set for Ms. Reyes', projectKey: 'sofa set for ms. reyes' })
+    );
+    await assertFails(movement(asStaff(), { project: 'Sofa Set', projectKey: 'Sofa Set' }));
+    await assertFails(movement(asStaff(), { project: 'Sofa Set', projectKey: 'something else' }));
+  });
+
+  // ---- 2.3 notes when the reason is Other ----
+
+  it('2.3 Other with no notes, or notes under 5 characters, is refused', async () => {
+    await assertFails(movement(asStaff(), { reason: 'Other', notes: '' }));
+    await assertFails(movement(asStaff(), { reason: 'Other', notes: '  abc  ' }));
+  });
+
+  it('2.3 Other with an explanation is allowed', async () => {
+    await assertSucceeds(movement(asStaff(), { reason: 'Other', notes: 'Used for shop repairs' }));
+  });
+});
+
+// ============================================================
 // 10 and 11. THE AUDIT TRAIL CANNOT BE AVOIDED OR ALTERED
 // ============================================================
 
@@ -1118,6 +1280,8 @@ describe('stock movements', () => {
       afterQty,
       movementDate: '2026-10-31',
       reason: 'Project Usage',
+      project: 'Sofa set',
+      projectKey: 'sofa set',
       loggedBy: uid,
       loggedByName: 'Seeded User',
       createdAt: serverTimestamp(),
